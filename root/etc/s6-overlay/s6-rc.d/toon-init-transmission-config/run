@@ -36,3 +36,10 @@ fi
 if [[ -n "${BLOCKLIST_URL}" ]]; then
     echo -E "$(jq -r --arg url "${BLOCKLIST_URL}" '.["blocklist-url"] = $url' /config/settings.json)" >/config/settings.json
 fi
+
+# --- Patch LSIO's noisy symlink creation ---
+# Replace ln -s with ln -sf so "File exists" warnings disappear
+
+for ui in /transmissionic /combustion-release /flood-for-transmission /kettu /transmission-web-control; do
+    ln -sf /defaults/index.html "$ui"
+done

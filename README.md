@@ -21,11 +21,17 @@ Use the `USER` and `PASS` variables in docker run/create/compose to set authenti
 
 Use `DONESCRIPT` to specify a script that executes when a torrent completes downloading. The script must be executable and exist at the specified path.
 
-Use `TARGET_DIR` to specify the directory where `DONESCRIPT` should symlink or process completed torrents.
+Use `TARGET_DIR` to specify the container-side mount point where completed torrents will be symlinked by `DONESCRIPT`. This should match the volume mount path inside the container.
 
 The `script-torrent-done-enabled` setting is automatically set to true only if the script file exists and is accessible. If the script path is invalid, this setting is automatically disabled.
 
-Example: `DONESCRIPT=/app/symlink-videos.sh` and `TARGET_DIR=/share/Transmission/video-links`
+Example with volume mount:
+```
+volumes:
+  - /path/to/video/links:/video-links
+environment:
+  - DONESCRIPT=/app/symlink-videos.sh
+```
 
 ## Configuring Blocklist Filtering
 
