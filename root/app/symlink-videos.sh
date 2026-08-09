@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-TARGET_DIR="${TARGET_DIR:-/video-links}"
+TARGET_DIR=/video-links
 DOWNLOAD_PATH="$TR_TORRENT_DIR/$TR_TORRENT_NAME"
 
 if [[ -e "$TARGET_DIR" ]] && [[ ! -d "$TARGET_DIR" ]]; then

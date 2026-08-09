@@ -19,11 +19,11 @@ services:
       HOST_WHITELIST: "${HOST_WHITELIST:-}"
       PEERPORT: "${PEERPORT:-}"
       DONESCRIPT: "${DONESCRIPT:-}"
-      TARGET_DIR: "${TARGET_DIR:-}"
     volumes:
       - "${CONFIG_DIR:-./config}:/config"
       - "${DOWNLOADS_DIR:-./downloads}:/downloads"
       - "${WATCH_DIR:-./watch}:/watch"
+      - "${TARGET_DIR:-./video-links}:/video-links"
     ports:
       - "${WEB_PORT:-9091}:9091"
       - "${TORRENT_PORT:-51413}:51413"
