@@ -1,0 +1,38 @@
+#!/usr/bin/with-contenv bash
+# shellcheck shell=bash
+
+# copy config
+if [[ ! -f /config/settings.json ]]; then
+    cp /defaults/settings.json /config/settings.json
+fi
+
+# Configure done script if set
+if [[ -n "${DONESCRIPT}" ]]; then
+    if [[ -f "${DONESCRIPT}" ]]; then
+        chmod +x "${DONESCRIPT}"
+        # Only enable script if file exists and has a value
+        echo -E "$(jq -r '.["script-torrent-done-enabled"] = true' /config/settings.json)" >/config/settings.json
+        echo -E "$(jq -r --arg donescript "${DONESCRIPT}" '.["script-torrent-done-filename"] = $donescript' /config/settings.json)" >/config/settings.json
+    else
+        echo "DONESCRIPT file not found: ${DONESCRIPT}" >&2
+        # Disable script if file doesn't exist
+        echo -E "$(jq -r '.["script-torrent-done-enabled"] = false' /config/settings.json)" >/config/settings.json
+    fi
+fi
+
+# Configure blocklist if enabled
+if [[ -n "${BLOCKLIST_ENABLED}" ]]; then
+    # Only set blocklist-enabled to true if BLOCKLIST_URL has a value
+    if [[ -n "${BLOCKLIST_URL}" ]]; then
+        # Convert string values to boolean for jq
+        blocklist_enabled_bool=$(echo "${BLOCKLIST_ENABLED}" | grep -iq "true\|yes\|1" && echo "true" || echo "false")
+        echo -E "$(jq -r --argjson enabled "${blocklist_enabled_bool}" '.["blocklist-enabled"] = $enabled' /config/settings.json)" >/config/settings.json
+    else
+        # Disable blocklist if no URL provided
+        echo -E "$(jq -r '.["blocklist-enabled"] = false' /config/settings.json)" >/config/settings.json
+    fi
+fi
+
+if [[ -n "${BLOCKLIST_URL}" ]]; then
+    echo -E "$(jq -r --arg url "${BLOCKLIST_URL}" '.["blocklist-url"] = $url' /config/settings.json)" >/config/settings.json
+fi

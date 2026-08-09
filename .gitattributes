@@ -1,6 +1,10 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 
+# Force LF for s6-overlay service files (must not have CRLF)
+root/etc/s6-overlay/** text eol=lf
+root/app/** text eol=lf
+
 # Custom for Visual Studio
 *.cs     diff=csharp
 

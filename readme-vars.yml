@@ -21,6 +21,7 @@ opt_param_usage_include_vols: true
 opt_param_volumes:
   - {vol_path: "/downloads", vol_host_path: "/path/to/downloads", desc: "Local path for downloads."}
   - {vol_path: "/watch", vol_host_path: "/path/to/watch/folder", desc: "Watch folder for torrent files."}
+  - {vol_path: "/video-links", vol_host_path: "/path/to/video/links", desc: "Mount point for TARGET_DIR - where completed torrents are symlinked by DONESCRIPT."}
 param_usage_include_ports: true
 param_ports:
   - {external_port: "9091", internal_port: "9091", port_desc: "WebUI"}
@@ -35,6 +36,11 @@ opt_param_env_vars:
   - {env_var: "WHITELIST", env_value: "", desc: "Specify an optional list of comma separated ip whitelist. Fills rpc-whitelist setting."}
   - {env_var: "PEERPORT", env_value: "", desc: "Specify an optional port for torrent TCP/UDP connections. Fills peer-port setting."}
   - {env_var: "HOST_WHITELIST", env_value: "", desc: "Specify an optional list of comma separated dns name whitelist. Fills rpc-host-whitelist setting."}
+  - {env_var: "DONESCRIPT", env_value: "/app/symlink-videos.sh", desc: "Script to execute when a torrent completes. Leave empty to disable."}
+  - {env_var: "TARGET_DIR", env_value: "/video-links", desc: "Directory where completed torrents are symlinked by DONESCRIPT."}
+  - {env_var: "BLOCKLIST_ENABLED", env_value: "false", desc: "Enable blocklist filtering for peer connections (true/false). Only takes effect if BLOCKLIST_URL is set."}
+  - {env_var: "BLOCKLIST_URL", env_value: "", desc: "URL to blocklist file for automatic peer filtering. Leave empty to disable blocklist."}
+  - {env_var: "NETWORK_NAME", env_value: "transmission-network", desc: "Custom Docker network name for container communication."}
 readonly_supported: true
 nonroot_supported: true
 # application setup block
@@ -46,13 +52,25 @@ app_setup_block: |
 
   Use the `USER` and `PASS` variables in docker run/create/compose to set authentication. Do not manually edit the `settings.json` to input user/pass, otherwise transmission cannot be stopped cleanly by the s6 supervisor.
 
-  ## Updating Blocklists Automatically
+  ## Configuring Done Script
 
-  This requires `"blocklist-enabled": true,` to be set. By setting this to true, it is assumed you have also populated `blocklist-url` with a valid block list.
+  Use `DONESCRIPT` to specify a script that executes when a torrent completes downloading. The script must be executable and exist at the specified path.
+  
+  Use `TARGET_DIR` to specify the directory where `DONESCRIPT` should symlink or process completed torrents.
+  
+  The `script-torrent-done-enabled` setting is automatically set to true only if the script file exists and is accessible. If the script path is invalid, this setting is automatically disabled.
 
-  The automatic update is a shell script that downloads a blocklist from the url stored in the settings.json, gunzips it, and restarts the transmission daemon.
+  Example: `DONESCRIPT=/app/symlink-videos.sh` and `TARGET_DIR=/share/Transmission/video-links`
 
-  The automatic update will run once a day at 3am local server time.
+  ## Configuring Blocklist Filtering
+
+  Use `BLOCKLIST_ENABLED` to enable or disable blocklist filtering (set to `true`, `yes`, `1`, or `false`).
+  
+  Use `BLOCKLIST_URL` to specify the URL to your blocklist file.
+  
+  **Important:** `blocklist-enabled` is only set to true when `BLOCKLIST_URL` has a valid value. If `BLOCKLIST_URL` is empty, blocklist filtering is automatically disabled even if `BLOCKLIST_ENABLED=true`.
+
+  The automatic blocklist update will run once a day at 3am local server time.
 
   ## Using whitelist
 
@@ -63,6 +81,10 @@ app_setup_block: |
   ## Use alternative Transmission torrent ports
 
   Use `PEERPORT` to specify the port(s) Transmission should listen on.  This disables random port selection.  This should be the same as the port mapped in your docker configuration.
+
+  ## Custom Docker Network
+
+  Use `NETWORK_NAME` to specify a custom Docker network for container communication. This allows you to isolate the Transmission container on a unique network while still maintaining port access from the host. The network must be created before running the container: `docker network create transmission-network`
 # init diagram
 init_diagram: |
   "transmission:latest": {
@@ -106,6 +128,7 @@ init_diagram: |
   "transmission:latest" <- Base Images
 # changelog
 changelogs:
+  - {date: "09.08.26:", desc: "Add environment variables for done script, blocklist, and custom network configuration."}
   - {date: "31.05.26:", desc: "Bind RPC to IPv6 interface by default, fall back to IPv4 if unavailable."}
   - {date: "29.11.24:", desc: "Fix PEERPORT setting."}
   - {date: "07.10.23:", desc: "Install unrar from [linuxserver repo](https://github.com/linuxserver/docker-unrar)."}

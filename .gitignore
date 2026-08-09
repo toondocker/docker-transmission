@@ -1,44 +1,26 @@
-# Windows image file caches
+# Environment files
+.env
+.env.test
+
+# Editor directories and files
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+*.code-workspace
+
+# Operating system files
+.DS_Store
 Thumbs.db
+desktop.ini
 ehthumbs.db
 
-# Folder config file
-Desktop.ini
+# Temporary / backup files
+*.log
+*.tmp
+*.swp
+*~
+*.bak
+*.orig
 
-# Recycle Bin used on file shares
-$RECYCLE.BIN/
-
-# Windows Installer files
-*.cab
-*.msi
-*.msm
-*.msp
-
-# Windows shortcuts
-*.lnk
-
-# =========================
-# Operating System Files
-# =========================
-
-# OSX
-# =========================
-
-.DS_Store
-.AppleDouble
-.LSOverride
-
-# Thumbnails
-._*
-
-# Files that might appear on external disk
-.Spotlight-V100
-.Trashes
-
-# Directories potentially created on remote AFP share
-.AppleDB
-.AppleDesktop
-Network Trash Folder
-Temporary Items
-.apdisk
-.jenkins-external
+docker-transmission-4.0.5-r3-ls240.zip

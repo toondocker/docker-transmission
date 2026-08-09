@@ -1,0 +1,53 @@
+version: "3.9"
+
+services:
+  transmission:
+    image: "${IMAGE:-docker.io/toondocker/docker-transmission:latest}"
+    container_name: transmission
+    # Security settings
+    security_opt:
+      # Prevent the container from gaining new privileges
+      - no-new-privileges:true
+    environment:
+      PUID: "${PUID:-1000}"
+      PGID: "${PGID:-1000}"
+      TZ: "${TZ:-Etc/UTC}"
+      TRANSMISSION_WEB_HOME: "${TRANSMISSION_WEB_HOME:-}"
+      USER: "${USER:-}"
+      PASS: "${PASS:-}"
+      WHITELIST: "${WHITELIST:-}"
+      HOST_WHITELIST: "${HOST_WHITELIST:-}"
+      PEERPORT: "${PEERPORT:-}"
+      DONESCRIPT: "${DONESCRIPT:-}"
+      TARGET_DIR: "${TARGET_DIR:-}"
+    volumes:
+      - "${CONFIG_DIR:-./config}:/config"
+      - "${DOWNLOADS_DIR:-./downloads}:/downloads"
+      - "${WATCH_DIR:-./watch}:/watch"
+    ports:
+      - "${WEB_PORT:-9091}:9091"
+      - "${TORRENT_PORT:-51413}:51413"
+      - "${TORRENT_PORT:-51413}:51413/udp"
+    restart: unless-stopped
+    # Logging configuration to prevent unbounded disk usage
+    logging:
+      driver: json-file
+      options:
+        max-file: "10"      # Keep maximum 10 log files
+        max-size: "10m"     # Each log file max 10MB
+    healthcheck:
+      test: ["CMD", "s6-svstat", "/run/service/svc-transmission"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+    # Connect to custom bridge network
+    networks:
+      - tm_net
+
+# Define custom bridge network for container communication
+networks:
+  tm_net:
+    name: ${NETWORK_NAME:-tm_net}
+    external: true

@@ -1,0 +1,122 @@
+version: 2.1
+
+# ======================================================================
+# ORB IMPORT
+# ======================================================================
+# toondocker/orb bundles three tools for streamlined CI/CD:
+# 1. circleci/docker@3  → Build and push container images
+# 2. circleci/shellcheck@3 → Lint shell scripts for errors
+# 3. snyk/snyk@2        → Scan for security vulnerabilities
+#
+# Repo: https://github.com/toondocker/orb
+# Registry: https://circleci.com/developer/orbs/orb/toondocker/orb
+# Full documentation: See "CircleCI Orb Documentation" section in README.md
+#
+# Version Pinning:
+# - @1.0.4 = specific version (recommended for production stability)
+# - @1.0   = latest 1.0.x (gets security patches)
+# - @1     = latest 1.x (gets new features)
+# - @latest = ❌ NOT RECOMMENDED (unpredictable breaks)
+#
+# Current: @1 means you get latest 1.x version automatically (includes patches & features)
+
+orbs:
+  orb: toondocker/orb@1
+
+workflows:
+  build_test_deploy:
+    jobs:
+      # ====================================================================
+      # JOB: orb/lint
+      # ====================================================================
+      # What it does:
+      #   1. Checks if files matching 'pattern' changed
+      #   2. If no match: halts (skip unnecessary linting)
+      #   3. If match: installs Shellcheck and lints those files
+      #   4. Fails if linting errors found
+      #
+      # Pattern: "s6-rc.d"
+      #   Regex that matches files/dirs to lint
+      #   In this case: only lint if anything in s6-rc.d/ changed
+      #   This prevents wasting time on linting when only docs/compose changed
+      #
+      # Why this matters:
+      #   - s6-rc.d contains shell scripts for the s6-overlay process supervisor
+      #   - Shellcheck validates syntax and catches common errors
+      #   - Saves CI time by skipping when s6-rc.d hasn't changed
+      #
+      - orb/lint:
+          pattern: "s6-rc.d"
+
+      # ====================================================================
+      # JOB: orb/publish
+      # ====================================================================
+      # What it does:
+      #   1. Checks if files matching 'pattern' changed (uses s6-rc.d from lint)
+      #   2. If no match: halts (skip unnecessary build)
+      #   3. If match: builds Docker image with build args (VERSION, BUILD_DATE, BUILTBY)
+      #   4. Scans image with Snyk for security vulnerabilities
+      #   5. Pushes image to Docker Hub
+      #      - Tagged as: docker.io/<DOCKER_USER>/ffmpeg:X.Y.Z (semver)
+      #      - Also tagged: docker.io/<DOCKER_USER>/ffmpeg:latest
+      #   6. Optionally cleans up old images (not configured here)
+      #
+      # Context: toonContext
+      #   CircleCI context containing secrets:
+      #   - DOCKER_USER: Your Docker Hub username
+      #   - DOCKER_PASS: Your Docker Hub personal access token (NOT password)
+      #   - SNYK_TOKEN: Your Snyk API token
+      #
+      #   Setup: Project Settings → Organization → Contexts → Create "toonContext"
+      #   See README.md for detailed setup instructions
+      #
+      # snyk_monitor: false
+      #   - false (current): Scan for issues locally, don't report to Snyk.io dashboard
+      #   - true: Send findings to Snyk.io for ongoing monitoring & remediation tracking
+      #   Default: false (reduces CI clutter)
+      #
+      # requires: [orb/lint]
+      #   - This job only runs if the lint job passes
+      #   - If lint finds errors, publish is skipped
+      #   - Ensures we don't push broken images
+      #
+      # Image build args injected by the orb:
+      #   These are automatically passed to Dockerfile during build:
+      #   - VERSION=${CIRCLE_BUILD_NUM} (e.g., 42)
+      #   - BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') (ISO 8601 timestamp)
+      #   - BUILTBY=${CIRCLE_USERNAME} (CircleCI username)
+      #   Your Dockerfile should capture these in LABEL instructions (see README)
+      #
+      - orb/publish:
+          context: toonContext
+          snyk_monitor: false  # Set to true to enable Snyk.io dashboard reporting
+          requires:
+            - orb/lint
+
+# ======================================================================
+# CONFIGURATION NOTES
+# ======================================================================
+#
+# About the orb:
+# - This config is minimal but functional. See README.md for:
+#   - Why this pipeline exists
+#   - How to audit the orb source code
+#   - Troubleshooting guide
+#   - Advanced configurations (multi-branch, scheduled scans, etc.)
+#
+# Build args captured by Dockerfile:
+# Your Dockerfile should include:
+#   ARG VERSION=unknown
+#   ARG BUILD_DATE=unknown
+#   ARG BUILTBY=unknown
+#
+#   LABEL org.opencontainers.image.version=${VERSION} \
+#         org.opencontainers.image.created=${BUILD_DATE} \
+#         org.opencontainers.image.authors=${BUILTBY}
+#
+# For detailed info: See README.md → "CircleCI Orb Documentation"
+#
+# Resources:
+# - Orb GitHub: https://github.com/toondocker/orb
+# - Orb Registry: https://circleci.com/developer/orbs/orb/toondocker/orb
+# - Troubleshooting: README.md → "CircleCI Orb Documentation" → Troubleshooting
