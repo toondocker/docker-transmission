@@ -19,6 +19,9 @@ services:
       HOST_WHITELIST: "${HOST_WHITELIST:-}"
       PEERPORT: "${PEERPORT:-}"
       DONESCRIPT: "${DONESCRIPT:-}"
+      SONARR_URL: "${SONARR_URL}"
+      SONARR_API_KEY: "${SONARR_API_KEY}"
+      SYMLINK_ROOT: "${SYMLINK_ROOT}"
     volumes:
       - "${CONFIG_DIR:-./config}:/config"
       - "${DOWNLOADS_DIR:-./downloads}:/downloads"
