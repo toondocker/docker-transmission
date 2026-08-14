@@ -53,10 +53,11 @@ RUN test -f /usr/bin/transmission-daemon || (echo "ERROR: Transmission binaries 
 # Copy local files (minimal content from root/)
 COPY root/ /
 
-# ensure S6 files have correct permissions
+# ensure S6 files have correct permissions and make scripts executable
 RUN find /etc/s6-overlay/s6-rc.d -type f -name run -exec chmod 0755 {} \; \
  && find /etc/s6-overlay/s6-rc.d -type d -exec chmod 0755 {} \; \
- && chown -R root:root /etc/s6-overlay/s6-rc.d
+ && chown -R root:root /etc/s6-overlay/s6-rc.d \
+ && chmod +x /app/*.sh
 
 # Expose ports and define volume
 EXPOSE 9091 51413/tcp 51413/udp

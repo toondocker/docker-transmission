@@ -33,6 +33,49 @@ environment:
   - DONESCRIPT=/app/symlink-videos.sh
 ```
 
+## Configuring Sonarr Integration
+
+The `symlink-videos.sh` script integrates with Sonarr to automatically organize downloaded TV episodes into a properly named directory structure using symlinks.
+
+### Setup Requirements
+
+1. **Sonarr running on the same Docker network** – When running Sonarr in a container on the same Docker network, use the container name as the hostname: `http://sonarr:8989`
+2. **Sonarr API Key** – Generate one in Sonarr: **Settings > General > Security > API Key**
+3. **Environment Variables** – Configure in `.env`:
+   - `SONARR_URL` – The URL to reach Sonarr (e.g., `http://sonarr:8989` or `http://192.168.1.100:8989`)
+   - `SONARR_API_KEY` – Your Sonarr API key (keep this private, never commit to GitHub)
+   - `SYMLINK_ROOT` – The **container-side** directory path where the script organizes symlinked episodes (e.g., `/video-links`, `/data/video-links`)
+
+### How It Works
+
+When a torrent completes:
+1. The done script extracts the series name and episode number from the torrent filename
+2. It queries Sonarr's API for the series ID and episode metadata
+3. Creates symlinks inside the container at: `SYMLINK_ROOT/Series Name/Season N/Series Name - SxxExx - Episode Title.ext`
+4. These symlinks are accessible on the host via the volume mount
+5. Results are cached per series to minimize API calls
+
+### Example Configuration
+
+`.env`:
+```
+SONARR_URL=http://sonarr:8989
+SONARR_API_KEY=your_api_key_here
+SYMLINK_ROOT=/video-links
+```
+
+`docker-compose.yml`:
+```yaml
+services:
+  transmission:
+    environment:
+      - SONARR_URL=${SONARR_URL}
+      - SONARR_API_KEY=${SONARR_API_KEY}
+      - SYMLINK_ROOT=${SYMLINK_ROOT}
+    volumes:
+      - /mnt/media/video-links:/video-links  # Host path : Container path (matches SYMLINK_ROOT)
+```
+
 ## Configuring Blocklist Filtering
 
 Use `BLOCKLIST_ENABLED` to enable or disable blocklist filtering (set to `true`, `yes`, `1`, or `false`).
@@ -95,6 +138,9 @@ services:
       - BLOCKLIST_ENABLED=false # optional
       - BLOCKLIST_URL= # optional
       - NETWORK_NAME=transmission-network # optional
+      - SONARR_URL=http://sonarr:8989 # optional
+      - SONARR_API_KEY= # optional
+      - SYMLINK_ROOT=/video-links # optional
     volumes:
       - /path/to/transmission/config:/config
       - /path/to/downloads:/downloads # optional
@@ -126,6 +172,9 @@ docker run -d \
   -e BLOCKLIST_ENABLED=false \ # optional
   -e BLOCKLIST_URL= \ # optional
   -e NETWORK_NAME=transmission-network \ # optional
+  -e SONARR_URL=http://sonarr:8989 \ # optional
+  -e SONARR_API_KEY= \ # optional
+  -e SYMLINK_ROOT=/video-links \ # optional
   -p 9091:9091 \
   -p 51413:51413 \
   -p 51413:51413/udp \
@@ -160,6 +209,9 @@ Containers are configured using parameters passed at runtime (such as those abov
 | `-e BLOCKLIST_ENABLED=` | Enable blocklist filtering for peer connections (true/false). Only takes effect if BLOCKLIST_URL is set. |
 | `-e BLOCKLIST_URL=` | URL to blocklist file for automatic peer filtering. Leave empty to disable blocklist. |
 | `-e NETWORK_NAME=` | Custom Docker network name for container communication. |
+| `-e SONARR_URL=` | URL to reach Sonarr service (e.g., http://sonarr:8989). Used by symlink-videos.sh script. |
+| `-e SONARR_API_KEY=` | Sonarr API key for authentication. Required for Sonarr integration. |
+| `-e SYMLINK_ROOT=` | Container-side directory path where symlinked video files will be organized by series/season. |
 | `-v /config` | Where transmission should store config files and logs. |
 | `-v /downloads` | Local path for downloads. |
 | `-v /watch` | Watch folder for torrent files. |
