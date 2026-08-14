@@ -80,13 +80,18 @@ create_sonarr_symlink() {
     # -----------------------------
     if [ "$raw_name" != "$CACHE_RAW_NAME" ]; then
         echo "[cache] Refreshing Sonarr cache for series '$raw_name'"
+        echo "[cache] Querying: ${SONARR_URL}/api/v3/series/lookup?term=${raw_name}&apikey=***"
 
         CACHE_RAW_NAME="$raw_name"
 
         # Lookup series
         series_json=$(wget -qO- "${SONARR_URL}/api/v3/series/lookup?term=${raw_name}&apikey=${SONARR_API_KEY}")
-        CACHE_SERIES_TITLE=$(echo "$series_json" | jq -r '.[0].title')
-        CACHE_SERIES_ID=$(echo "$series_json" | jq -r '.[0].id')
+        echo "[cache] Response length: ${#series_json} bytes"
+        [ -n "$series_json" ] && echo "[cache] First 300 chars: $(echo "$series_json" | head -c 300)" || echo "[cache] Empty response"
+        
+        CACHE_SERIES_TITLE=$(echo "$series_json" | jq -r '.[0].title' 2>/dev/null || echo "")
+        CACHE_SERIES_ID=$(echo "$series_json" | jq -r '.[0].id' 2>/dev/null || echo "")
+        echo "[cache] Parsed - Title: '$CACHE_SERIES_TITLE', ID: '$CACHE_SERIES_ID'"
 
         if [ -z "$CACHE_SERIES_TITLE" ] || [ "$CACHE_SERIES_TITLE" = "null" ]; then
             echo "[symlink] ERROR: Sonarr could not identify series for '$raw_name'"
@@ -95,24 +100,30 @@ create_sonarr_symlink() {
         fi
 
         # Lookup all episodes for this series
+        echo "[cache] Querying episodes for series ID: $CACHE_SERIES_ID"
         CACHE_EPISODES_JSON=$(wget -qO- "${SONARR_URL}/api/v3/episode?seriesId=${CACHE_SERIES_ID}&apikey=${SONARR_API_KEY}")
         if [ -z "$CACHE_EPISODES_JSON" ]; then
             echo "[symlink] ERROR: Sonarr returned no episode list for '$CACHE_SERIES_TITLE'"
             CACHE_RAW_NAME=""
             return 1
         fi
+        episode_count=$(echo "$CACHE_EPISODES_JSON" | jq 'length' 2>/dev/null || echo "0")
+        echo "[cache] Retrieved $episode_count episodes"
+    else
+        echo "[cache] Using cached data for '$raw_name'"
     fi
 
     # -----------------------------
     # USE CACHED DATA
     # -----------------------------
     series_title="$CACHE_SERIES_TITLE"
-    # series_id="$CACHE_SERIES_ID"
     episodes_json="$CACHE_EPISODES_JSON"
 
     # Lookup episode title from cached JSON
     episode_title=$(echo "$episodes_json" | jq -r \
-        ".[] | select(.seasonNumber==$season and .episodeNumber==$episode) | .title")
+        ".[] | select(.seasonNumber==$season and .episodeNumber==$episode) | .title" 2>/dev/null || echo "")
+
+    echo "[cache] Looking for S${season}E${episode} - found title: '$episode_title'"
 
     if [ -z "$episode_title" ] || [ "$episode_title" = "null" ]; then
         echo "[symlink] ERROR: Sonarr has no metadata for S${season}E${episode}"
@@ -140,6 +151,13 @@ create_sonarr_symlink() {
 # Main logic (guarded)
 # -----------------------------
 
+echo "[main] RUN_MODE: $RUN_MODE"
+echo "[main] TR_TORRENT_DIR: $TR_TORRENT_DIR"
+echo "[main] TR_TORRENT_NAME: $TR_TORRENT_NAME"
+echo "[main] DOWNLOAD_PATH: $DOWNLOAD_PATH"
+echo "[main] SONARR_URL: $SONARR_URL"
+echo "[main] SYMLINK_ROOT: $SYMLINK_ROOT"
+
 if [ "$RUN_MODE" != "test" ]; then
 
     if [[ -e "$SYMLINK_ROOT" ]] && [[ ! -d "$SYMLINK_ROOT" ]]; then
@@ -148,29 +166,46 @@ if [ "$RUN_MODE" != "test" ]; then
     fi
 
     mkdir -p "$SYMLINK_ROOT"
+    echo "[main] SYMLINK_ROOT directory ready: $SYMLINK_ROOT"
 
     raw_name=$(clean_raw_name "$TR_TORRENT_NAME")
+    echo "[main] Cleaned torrent name: '$raw_name'"
 
     # Check if the downloaded item is a directory
     if [[ -d "$DOWNLOAD_PATH" ]]; then
+        echo "[main] DOWNLOAD_PATH is a directory, scanning for video files..."
         # Only scan inside this specific torrent's directory
         find "$DOWNLOAD_PATH" -type f \( -name "*.mp4" -o -name "*.mkv" -o -name "*.avi" -o -name "*.mov" \) | while read -r video_file; do
-            # file_name=$(basename "$video_file")
-            # ln -sf "$video_file" "$SYMLINK_ROOT/$file_name" && \
-            #     echo "Symlinked: $file_name" || echo "ERROR: Failed to symlink $file_name" >&2
+            echo "[main] Found video file: $video_file"
             # Call the Sonarr naming function
             create_sonarr_symlink "$raw_name" "$video_file"
         done
+        echo "[main] Directory scan complete"
 
     # Check if the downloaded item is a single file and matches video extensions
     elif [[ -f "$DOWNLOAD_PATH" ]]; then
+        echo "[main] DOWNLOAD_PATH is a file: $DOWNLOAD_PATH"
         case "$TR_TORRENT_NAME" in
             *.mp4|*.mkv|*.avi|*.mov)
-                # ln -sf "$DOWNLOAD_PATH" "$SYMLINK_ROOT/$TR_TORRENT_NAME" && \
-                #     echo "Symlinked: $TR_TORRENT_NAME" || echo "ERROR: Failed to symlink $TR_TORRENT_NAME" >&2
+                echo "[main] File matches video extension, creating symlink..."
                 # Call the Sonarr naming function
                 create_sonarr_symlink "$raw_name" "$TR_TORRENT_NAME"
                 ;;
+            *)
+                echo "[main] File does not match video extensions: $TR_TORRENT_NAME"
+                ;;
         esac
+    else
+        echo "[main] ERROR: DOWNLOAD_PATH does not exist or is neither file nor directory: $DOWNLOAD_PATH" >&2
+        echo "[main] Checking path existence:"
+        if [ -e "$DOWNLOAD_PATH" ]; then
+            echo "[main]   Path exists but is not a regular file or directory"
+        else
+            echo "[main]   Path does not exist"
+        fi
     fi
+
+    echo "[main] Done"
+else
+    echo "[main] TEST MODE: Main logic skipped"
 fi
