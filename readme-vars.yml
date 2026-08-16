@@ -21,7 +21,7 @@ opt_param_usage_include_vols: true
 opt_param_volumes:
   - {vol_path: "/downloads", vol_host_path: "/path/to/downloads", desc: "Local path for downloads."}
   - {vol_path: "/watch", vol_host_path: "/path/to/watch/folder", desc: "Watch folder for torrent files."}
-  - {vol_path: "/video-links", vol_host_path: "/path/to/video/links", desc: "Mount point for TARGET_DIR - where completed torrents are symlinked by DONESCRIPT."}
+  - {vol_path: "/video-links", vol_host_path: "/path/to/video/links", desc: "Mount point for TRANSMISSION_DIR - where completed torrents are symlinked by DONESCRIPT."}
 param_usage_include_ports: true
 param_ports:
   - {external_port: "9091", internal_port: "9091", port_desc: "WebUI"}
@@ -37,7 +37,7 @@ opt_param_env_vars:
   - {env_var: "PEERPORT", env_value: "", desc: "Specify an optional port for torrent TCP/UDP connections. Fills peer-port setting."}
   - {env_var: "HOST_WHITELIST", env_value: "", desc: "Specify an optional list of comma separated dns name whitelist. Fills rpc-host-whitelist setting."}
   - {env_var: "DONESCRIPT", env_value: "/app/symlink-videos.sh", desc: "Script to execute when a torrent completes. Leave empty to disable."}
-  - {env_var: "TARGET_DIR", env_value: "/video-links", desc: "Directory where completed torrents are symlinked by DONESCRIPT."}
+  - {env_var: "TRANSMISSION_DIR", env_value: "/video-links", desc: "Directory where completed torrents are symlinked by DONESCRIPT."}
   - {env_var: "BLOCKLIST_ENABLED", env_value: "false", desc: "Enable blocklist filtering for peer connections (true/false). Only takes effect if BLOCKLIST_URL is set."}
   - {env_var: "BLOCKLIST_URL", env_value: "", desc: "URL to blocklist file for automatic peer filtering. Leave empty to disable blocklist."}
   - {env_var: "NETWORK_NAME", env_value: "transmission-network", desc: "Custom Docker network name for container communication."}
@@ -56,11 +56,11 @@ app_setup_block: |
 
   Use `DONESCRIPT` to specify a script that executes when a torrent completes downloading. The script must be executable and exist at the specified path.
   
-  Use `TARGET_DIR` to specify the directory where `DONESCRIPT` should symlink or process completed torrents.
+  Use `TRANSMISSION_DIR` to specify the directory where `DONESCRIPT` should symlink or process completed torrents.
   
   The `script-torrent-done-enabled` setting is automatically set to true only if the script file exists and is accessible. If the script path is invalid, this setting is automatically disabled.
 
-  Example: `DONESCRIPT=/app/symlink-videos.sh` and `TARGET_DIR=/share/Transmission/video-links`
+  Example: `DONESCRIPT=/app/symlink-videos.sh` and `TRANSMISSION_DIR=/share/Transmission/video-links`
 
   ## Configuring Blocklist Filtering
 

@@ -65,3 +65,4 @@ EXPOSE 9091 51413/tcp 51413/udp
 # Health check: verify the s6-managed Transmission service is running
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
     CMD s6-svstat /run/service/svc-transmission >/dev/null 2>&1 || exit 1
+ 

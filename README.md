@@ -21,7 +21,7 @@ Use the `USER` and `PASS` variables in docker run/create/compose to set authenti
 
 Use `DONESCRIPT` to specify a script that executes when a torrent completes downloading. The script must be executable and exist at the specified path.
 
-Use `TARGET_DIR` to specify the container-side mount point where completed torrents will be symlinked by `DONESCRIPT`. This should match the volume mount path inside the container.
+Use `TRANSMISSION_DIR` to specify the container-side mount point where completed torrents will be symlinked by `DONESCRIPT`. This should match the volume mount path inside the container.
 
 The `script-torrent-done-enabled` setting is automatically set to true only if the script file exists and is accessible. If the script path is invalid, this setting is automatically disabled.
 
@@ -44,14 +44,14 @@ The `symlink-videos.sh` script integrates with Sonarr to automatically organize 
 3. **Environment Variables** – Configure in `.env`:
    - `SONARR_URL` – The URL to reach Sonarr (e.g., `http://sonarr:8989` or `http://192.168.1.100:8989`)
    - `SONARR_API_KEY` – Your Sonarr API key (keep this private, never commit to GitHub)
-   - `SYMLINK_ROOT` – The **container-side** directory path where the script organizes symlinked episodes (e.g., `/video-links`, `/data/video-links`)
+   - `VIDEO_LINKS` – The **container-side** directory path where the script organizes symlinked episodes (e.g., `/video-links`, `/data/video-links`)
 
 ### How It Works
 
 When a torrent completes:
 1. The done script extracts the series name and episode number from the torrent filename
 2. It queries Sonarr's API for the series ID and episode metadata
-3. Creates symlinks inside the container at: `SYMLINK_ROOT/Series Name/Season N/Series Name - SxxExx - Episode Title.ext`
+3. Creates symlinks inside the container at: `VIDEO_LINKS/Series Name/Season N/Series Name - SxxExx - Episode Title.ext`
 4. These symlinks are accessible on the host via the volume mount
 5. Results are cached per series to minimize API calls
 
@@ -61,7 +61,7 @@ When a torrent completes:
 ```
 SONARR_URL=http://sonarr:8989
 SONARR_API_KEY=your_api_key_here
-SYMLINK_ROOT=/video-links
+VIDEO_LINKS=/video-links
 ```
 
 `docker-compose.yml`:
@@ -71,9 +71,9 @@ services:
     environment:
       - SONARR_URL=${SONARR_URL}
       - SONARR_API_KEY=${SONARR_API_KEY}
-      - SYMLINK_ROOT=${SYMLINK_ROOT}
+      - VIDEO_LINKS=${VIDEO_LINKS}
     volumes:
-      - /mnt/media/video-links:/video-links  # Host path : Container path (matches SYMLINK_ROOT)
+      - /mnt/media/video-links:/video-links  # Host path : Container path (matches VIDEO_LINKS)
 ```
 
 ## Configuring Blocklist Filtering
@@ -134,13 +134,13 @@ services:
       - HOST_WHITELIST= # optional
       - PEERPORT= # optional
       - DONESCRIPT=/app/symlink-videos.sh # optional
-      - TARGET_DIR=/video-links # optional
+      - TRANSMISSION_DIR=/video-links # optional
       - BLOCKLIST_ENABLED=false # optional
       - BLOCKLIST_URL= # optional
       - NETWORK_NAME=transmission-network # optional
       - SONARR_URL=http://sonarr:8989 # optional
       - SONARR_API_KEY= # optional
-      - SYMLINK_ROOT=/video-links # optional
+      - VIDEO_LINKS=/video-links # optional
     volumes:
       - /path/to/transmission/config:/config
       - /path/to/downloads:/downloads # optional
@@ -168,13 +168,13 @@ docker run -d \
   -e PEERPORT= \ # optional
   -e HOST_WHITELIST= \ # optional
   -e DONESCRIPT=/app/symlink-videos.sh \ # optional
-  -e TARGET_DIR=/video-links \ # optional
+  -e TRANSMISSION_DIR=/video-links \ # optional
   -e BLOCKLIST_ENABLED=false \ # optional
   -e BLOCKLIST_URL= \ # optional
   -e NETWORK_NAME=transmission-network \ # optional
   -e SONARR_URL=http://sonarr:8989 \ # optional
   -e SONARR_API_KEY= \ # optional
-  -e SYMLINK_ROOT=/video-links \ # optional
+  -e VIDEO_LINKS=/video-links \ # optional
   -p 9091:9091 \
   -p 51413:51413 \
   -p 51413:51413/udp \
@@ -205,17 +205,17 @@ Containers are configured using parameters passed at runtime (such as those abov
 | `-e PEERPORT=` | Specify an optional port for torrent TCP/UDP connections. Fills peer-port setting. |
 | `-e HOST_WHITELIST=` | Specify an optional list of comma separated dns name whitelist. Fills rpc-host-whitelist setting. |
 | `-e DONESCRIPT=` | Script to execute when a torrent completes. Leave empty to disable. |
-| `-e TARGET_DIR=` | Directory where completed torrents are symlinked by DONESCRIPT. |
+| `-e TRANSMISSION_DIR=` | Directory where completed torrents are symlinked by DONESCRIPT. |
 | `-e BLOCKLIST_ENABLED=` | Enable blocklist filtering for peer connections (true/false). Only takes effect if BLOCKLIST_URL is set. |
 | `-e BLOCKLIST_URL=` | URL to blocklist file for automatic peer filtering. Leave empty to disable blocklist. |
 | `-e NETWORK_NAME=` | Custom Docker network name for container communication. |
 | `-e SONARR_URL=` | URL to reach Sonarr service (e.g., http://sonarr:8989). Used by symlink-videos.sh script. |
 | `-e SONARR_API_KEY=` | Sonarr API key for authentication. Required for Sonarr integration. |
-| `-e SYMLINK_ROOT=` | Container-side directory path where symlinked video files will be organized by series/season. |
+| `-e VIDEO_LINKS=` | Container-side directory path where symlinked video files will be organized by series/season. |
 | `-v /config` | Where transmission should store config files and logs. |
 | `-v /downloads` | Local path for downloads. |
 | `-v /watch` | Watch folder for torrent files. |
-| `-v /video-links` | Mount point for TARGET_DIR - where completed torrents are symlinked by DONESCRIPT. |
+| `-v /video-links` | Mount point for TRANSMISSION_DIR - where completed torrents are symlinked by DONESCRIPT. |
 | `--read-only=true` | Run container with a read-only filesystem. Please [read the docs](https://docs.linuxserver.io/misc/read-only/). |
 | `--user=1000:1000` | Run container with a non-root user. Please [read the docs](https://docs.linuxserver.io/misc/non-root/). |
 
