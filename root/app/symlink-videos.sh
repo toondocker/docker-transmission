@@ -127,25 +127,26 @@ urlencode() {
 json_str() {
     printf '%s' "$2" \
         | grep -o "\"${1}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" \
-        | sed "s/\"${1}\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\"/\1/" \
+        | sed "s/.*\"${1}\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/" \
         | head -1
 }
 
 # json_num <key> <json>  →  numeric / bool / null value, unquoted
 json_num() {
     printf '%s' "$2" \
-        | grep -o "\"${1}\"[[:space:]]*:[[:space:]]*[0-9A-Za-z_][^,}\"]*" \
-        | sed "s/\"${1}\"[[:space:]]*:[[:space:]]*//" \
-        | tr -d ' ' \
+        | grep -o "\"${1}\"[[:space:]]*:[[:space:]]*[0-9][0-9]*" \
+        | sed "s/.*\"${1}\"[[:space:]]*:[[:space:]]*//" \
         | head -1
 }
 
 # json_split <json_array>  →  one top-level object per stdout line
 json_split() {
+    # Remove outer [ ] and split objects on "},{"
     printf '%s' "$1" \
         | sed 's/^\[//; s/\]$//' \
-        | sed 's/},{/}\{/g'
+        | sed 's/},{/}\n{/g'
 }
+
 
 
 # ───────────────────────────────────────────────────────────────────
@@ -293,12 +294,10 @@ extract_year() {
 # Radarr lookup succeeds despite punctuation differences in the name.
 #
 #   v1: as-is          "Ms.X"
-#   v2: space → dash
-#   v3: dots → dash 
-#   v4: dots → spaces  "Ms X"
-#   v5: no dots        "MsX"
-#   v6: dot-space      "Ms. X"
-#   v7: no apostrophes (handles "It's" etc.)
+#   v2: dots → spaces  "Ms X"
+#   v3: no dots        "MsX"
+#   v4: dot-space      "Ms. X"
+#   v5: no apostrophes (handles "It's" etc.)
 #
 # A case-insensitive seen-file prevents the same normalised form being
 # queried twice even when multiple variants collapse to the same string.
@@ -307,12 +306,10 @@ extract_year() {
 _build_variants() {
     _t="$1"
     printf '%s\n' "$_t"                                           # v1
-    printf '%s\n' "$_t" | tr ' ' '-'                              # v2
-    printf '%s\n' "$_t" | tr '.' '-'                              # v3
-    printf '%s\n' "$_t" | tr '.' ' ' | sed 's/  */ /g; s/ *$//'   # v4
-    printf '%s\n' "$_t" | tr -d '.'                               # v5
-    printf '%s\n' "$_t" | sed 's/\.\([^ ]\)/. \1/g'               # v6
-    printf '%s\n' "$_t" | tr -d "'"                               # v7
+    printf '%s\n' "$_t" | tr '.' ' ' | sed 's/  */ /g; s/ *$//'   # v2
+    printf '%s\n' "$_t" | tr -d '.'                               # v3
+    printf '%s\n' "$_t" | sed 's/\.\([^ ]\)/. \1/g'               # v4
+    printf '%s\n' "$_t" | tr -d "'"                               # v5
 }
 
 
@@ -322,10 +319,12 @@ _build_variants() {
 
 _sonarr_get() {
     # _sonarr_get <api_path>  →  stdout: response body
+    set -x
     wget -q -O - \
         --header="X-Api-Key: ${SONARR_API_KEY}" \
         --header="Accept: application/json" \
         "${SONARR_URL}/api/v3${1}" 2>/dev/null
+    set +x
 }
 
 # find_sonarr_series <title>
@@ -350,12 +349,43 @@ find_sonarr_series() {
         _resp=$(_sonarr_get "/series/lookup?term=$(urlencode "$_var")") || continue
         [ -z "$_resp" ] || [ "$_resp" = "[]" ] && continue
 
-        _first=$(json_split "$_resp" | head -1)
-        _sid=$(json_num "id" "$_first")
-        case "$_sid" in ''|*[!0-9]*|0) continue ;; esac
+        tmp=$(_tmpfile "json_resp")
+        json_split "$_resp" > "$tmp"
 
-        SERIES_ID="$_sid"
-        SERIES_TITLE=$(json_str "title" "$_first")
+        _best=""
+        while IFS= read -r obj; do
+            title=$(json_str "title" "$obj")
+            clean=$(json_str "cleanTitle" "$obj")
+            # tvdb=$(json_num "tvdbId" "$obj")
+
+            # 1. Exact title match
+            if [ "$title" = "$_var" ]; then
+                _best="$obj"
+                break
+            fi
+
+            # 2. Exact cleanTitle match
+            _var_clean=$(printf '%s' "$_var" | tr -d ' .'"'" | tr '[:upper:]' '[:lower:]')
+            if [ "$clean" = "$_var_clean" ]; then
+                _best="$obj"
+                break
+            fi
+
+            # # 3. Known TVDB ID for Ms. X
+            # if [ "$tvdb" = "464217" ]; then
+            #     _best="$obj"
+            #     break
+            # fi
+
+            # 4. Fallback: first object
+            [ -z "$_best" ] && _best="$obj"
+
+        done < "$tmp"
+
+        rm -f "$tmp"
+
+        SERIES_ID=$(json_num "id" "$_best")
+        SERIES_TITLE=$(json_str "title" "$_best")
         log_info "Sonarr match: id=[$SERIES_ID] title=[$SERIES_TITLE] via=[$_var]"
         return 0
     done < "$_var_f"
