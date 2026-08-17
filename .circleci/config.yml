@@ -89,6 +89,7 @@ workflows:
       #
       - orb/publish:
           context: toonContext
+          pattern: "Dockerfile|s6-rc.d|app"
           snyk_monitor: false  # Set to true to enable Snyk.io dashboard reporting
           requires:
             - orb/lint

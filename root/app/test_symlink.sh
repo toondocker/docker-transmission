@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # Test a single file
 # ./test_symlink.sh  "/downloads/complete/Prog at the BBC (2009).SD.AVC.AAC.eng.mkv"
 # Test a folder with mixed junk
