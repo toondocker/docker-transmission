@@ -46,7 +46,7 @@ workflows:
       #   - Saves CI time by skipping when s6-rc.d hasn't changed
       #
       - orb/lint:
-          pattern: "s6-rc.d"
+          pattern: "s6-rc.d|app|config.yml"  # Only lint if these files changed
 
       # ====================================================================
       # JOB: orb/publish
@@ -89,7 +89,7 @@ workflows:
       #
       - orb/publish:
           context: toonContext
-          pattern: "Dockerfile|s6-rc.d|app"
+          pattern: "Dockerfile|s6-rc.d|app|config.yml"  # Only build if these files changed
           snyk_monitor: false  # Set to true to enable Snyk.io dashboard reporting
           requires:
             - orb/lint
