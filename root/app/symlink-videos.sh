@@ -338,7 +338,7 @@ find_sonarr_series() {
     while IFS= read -r _var; do
         [ -z "$_var" ] && continue
 
-        _low=$(printf '%s' "$_var" | tr 'A-Z' 'a-z')
+        _low=$(printf '%s' "$_var" | tr '[:upper:]' '[:lower:]')
         grep -qxF "$_low" "$_seen_f" 2>/dev/null && continue
         printf '%s\n' "$_low" >> "$_seen_f"
 
@@ -419,7 +419,7 @@ find_radarr_movie() {
     while IFS= read -r _var; do
         [ -z "$_var" ] && continue
 
-        _low=$(printf '%s' "$_var" | tr 'A-Z' 'a-z')
+        _low=$(printf '%s' "$_var" | tr '[:upper:]' '[:lower:]')
         grep -qxF "$_low" "$_seen_f" 2>/dev/null && continue
         printf '%s\n' "$_low" >> "$_seen_f"
 
@@ -509,9 +509,12 @@ _make_symlink() {
         return 1
     fi
 
-    ln -sf "$_src" "$_dst" \
-        && log_info "Symlink OK: [$_dst]" \
-        || { log_error "ln -sf failed: $_src → $_dst"; return 1; }
+    if ln -sf "$_src" "$_dst"; then
+        log_info "Symlink OK: [$_dst]"
+    else
+        log_error "ln -sf failed: $_src → $_dst"
+        return 1
+    fi
 }
 
 # _link_files <video_list_file> <dest_dir>
