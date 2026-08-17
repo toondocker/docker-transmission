@@ -81,8 +81,8 @@ _tmpfile() {
     printf '%s/%s' "$_TMPDIR" "$1"
 }
 
-# shellcheck disable=SC2329
-_cleanup() { [ -n "$_TMPDIR" ] && rm -rf "$_TMPDIR"; }
+# shellcheck disable=SC2329,SC2317
+_cleanup() { [ -n "$_TMPDIR" ] && rm -rf "$_TMPDIR"; } 
 trap _cleanup EXIT HUP INT TERM
 
 # ── Structured logging ──────────────────────────────────────────────
