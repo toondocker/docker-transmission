@@ -31,6 +31,10 @@ services:
       - "${TRANSMISSION_DIR:-./downloads}${WATCH_DIR:-/watch}:/watch"
       - "${TRANSMISSION_DIR:-./downloads}${MOVIE_LINKS:-/movies}:/movie-links"
       - "${TRANSMISSION_DIR:-./downloads}${VIDEO_LINKS:-/videos}:/video-links"
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 64M
     ports:
       - "${WEB_PORT:-9091}:9091"
       - "${TORRENT_PORT:-51413}:51413"

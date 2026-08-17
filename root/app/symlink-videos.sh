@@ -1,5 +1,5 @@
 #!/bin/sh
-# shellcheck shell=sh
+# shellcheck shell=ash
 
 # ═══════════════════════════════════════════════════════════════════
 # postprocess.sh — Unified torrent post-process
@@ -293,10 +293,12 @@ extract_year() {
 # Radarr lookup succeeds despite punctuation differences in the name.
 #
 #   v1: as-is          "Ms.X"
-#   v2: dots → spaces  "Ms X"
-#   v3: no dots        "MsX"
-#   v4: dot-space      "Ms. X"
-#   v5: no apostrophes (handles "It's" etc.)
+#   v2: space → dash
+#   v3: dots → dash 
+#   v4: dots → spaces  "Ms X"
+#   v5: no dots        "MsX"
+#   v6: dot-space      "Ms. X"
+#   v7: no apostrophes (handles "It's" etc.)
 #
 # A case-insensitive seen-file prevents the same normalised form being
 # queried twice even when multiple variants collapse to the same string.
@@ -305,10 +307,12 @@ extract_year() {
 _build_variants() {
     _t="$1"
     printf '%s\n' "$_t"                                           # v1
-    printf '%s\n' "$_t" | tr '.' ' ' | sed 's/  */ /g; s/ *$//'   # v2
-    printf '%s\n' "$_t" | tr -d '.'                               # v3
-    printf '%s\n' "$_t" | sed 's/\.\([^ ]\)/. \1/g'               # v4
-    printf '%s\n' "$_t" | tr -d "'"                               # v5
+    printf '%s\n' "$_t" | tr ' ' '-'                              # v2
+    printf '%s\n' "$_t" | tr '.' '-'                              # v3
+    printf '%s\n' "$_t" | tr '.' ' ' | sed 's/  */ /g; s/ *$//'   # v4
+    printf '%s\n' "$_t" | tr -d '.'                               # v5
+    printf '%s\n' "$_t" | sed 's/\.\([^ ]\)/. \1/g'               # v6
+    printf '%s\n' "$_t" | tr -d "'"                               # v7
 }
 
 
