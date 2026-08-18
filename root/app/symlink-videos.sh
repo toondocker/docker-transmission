@@ -150,6 +150,21 @@ json_split() {
         | sed 's/},{/}\n{/g'
 }
 
+
+# json_string='{"name": "server-01", "status": "running"}'
+# target_key="status"
+
+# value=$(echo "$json_string" | awk -F"[,:}]" -v key="$target_key" '{
+#     for(i=1; i<=NF; i++) {
+#         if($i ~ "\""key"\"") {
+#             print $(i+1)
+#         }
+#     }
+# }' | tr -d '"[:space:]')
+
+# echo "Extracted Value: $value"
+
+
 # ───────────────────────────────────────────────────────────────────
 # §4  RELEASE DETECTION
 #
@@ -320,12 +335,10 @@ _build_variants() {
 
 _sonarr_get() {
     # _sonarr_get <api_path>  →  stdout: response body
-    set -x
     wget -q -O - \
         --header="X-Api-Key: ${SONARR_API_KEY}" \
         --header="Accept: application/json" \
         "${SONARR_URL}/api/v3${1}" 2>/dev/null
-    set +x
 }
 
 # find_sonarr_series <title>
@@ -351,13 +364,17 @@ find_sonarr_series() {
         [ -z "$_resp" ] || [ "$_resp" = "[]" ] && continue
 
         tmp=$(_tmpfile "json_resp")
+        set -x
         json_split "$_resp" > "$tmp"
+        set +x
 
         _best=""
         while IFS= read -r obj; do
+            set -x
             title=$(json_str "title" "$obj")
             clean=$(json_str "cleanTitle" "$obj")
             # tvdb=$(json_num "tvdbId" "$obj")
+            set +x
 
             # 1. Exact title match
             if [ "$title" = "$_var" ]; then
