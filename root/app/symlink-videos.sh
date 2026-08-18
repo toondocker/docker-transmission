@@ -82,7 +82,10 @@ _tmpfile() {
 }
 
 # shellcheck disable=SC2329,SC2317
-_cleanup() { [ -n "$_TMPDIR" ] && rm -rf "$_TMPDIR"; } 
+_cleanup() {
+    # Delete only our own temp files
+    rm -f /tmp/postproc.* 2>/dev/null
+}
 trap _cleanup EXIT HUP INT TERM
 
 # ── Structured logging ──────────────────────────────────────────────
@@ -126,28 +129,26 @@ urlencode() {
 # json_str <key> <json>  →  string value, unquoted
 json_str() {
     printf '%s' "$2" \
-        | grep -o "\"${1}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" \
-        | sed "s/.*\"${1}\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/" \
+        | tr '\n' ' ' \
+        | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" \
         | head -1
 }
 
 # json_num <key> <json>  →  numeric / bool / null value, unquoted
 json_num() {
     printf '%s' "$2" \
-        | grep -o "\"${1}\"[[:space:]]*:[[:space:]]*[0-9][0-9]*" \
-        | sed "s/.*\"${1}\"[[:space:]]*:[[:space:]]*//" \
+        | tr '\n' ' ' \
+        | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p" \
         | head -1
 }
 
 # json_split <json_array>  →  one top-level object per stdout line
 json_split() {
-    # Remove outer [ ] and split objects on "},{"
     printf '%s' "$1" \
+        | tr '\n' ' ' \
         | sed 's/^\[//; s/\]$//' \
         | sed 's/},{/}\n{/g'
 }
-
-
 
 # ───────────────────────────────────────────────────────────────────
 # §4  RELEASE DETECTION
