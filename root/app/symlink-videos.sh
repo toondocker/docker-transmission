@@ -84,7 +84,7 @@ _tmpfile() {
 # shellcheck disable=SC2329,SC2317
 _cleanup() {
     # Delete only our own temp files
-    rm -f /tmp/postproc.* 2>/dev/null
+    rm -rf /tmp/postproc.* 2>/dev/null
 }
 trap _cleanup EXIT HUP INT TERM
 
@@ -147,22 +147,39 @@ json_split() {
     printf '%s' "$1" \
         | tr '\n' ' ' \
         | sed 's/^\[//; s/\]$//' \
-        | sed 's/},{/}\n{/g'
+        | sed 's/},[[:space:]]*{/}\n{/g'
 }
 
 
-# json_string='{"name": "server-01", "status": "running"}'
-# target_key="status"
-
-# value=$(echo "$json_string" | awk -F"[,:}]" -v key="$target_key" '{
-#     for(i=1; i<=NF; i++) {
-#         if($i ~ "\""key"\"") {
-#             print $(i+1)
-#         }
-#     }
-# }' | tr -d '"[:space:]')
-
-# echo "Extracted Value: $value"
+get_title() {
+    search="$1"
+    printf '%s\n' "$_resp" |
+    awk -F'"' -v search="$search" '
+    /"title"[[:space:]]*:/ {
+        title = $4
+        tvdbId = ""
+        year = ""
+        tmdbId = ""
+    }
+    /"year"[[:space:]]*:/ {
+    match($0, /[0-9]+/)
+    year = substr($0, RSTART, RLENGTH)
+    }
+    /"tvdbId"[[:space:]]*:/ {
+    match($0, /[0-9]+/)
+    tvdbId = substr($0, RSTART, RLENGTH)
+    }
+    /"tmdbId"[[:space:]]*:/ {
+    match($0, /[0-9]+/)
+    tmdbId = substr($0, RSTART, RLENGTH)
+    }
+    /"cleanTitle"[[:space:]]*:/ {
+        if ($4 == search) {
+            print title "|" tvdbId "|" year "|" tmdbId
+            exit
+        }
+    }'
+}
 
 
 # ───────────────────────────────────────────────────────────────────
@@ -347,6 +364,42 @@ _sonarr_get() {
 # Returns: 0 = found  1 = not found
 find_sonarr_series() {
     _LOG_CTX="find_sonarr_series"
+    _seen_f=$(_tmpfile "sv_seen")
+    touch "$_seen_f"
+    _var_clean=$(printf '%s' "$1" | tr -d ' .'"'" | tr '[:upper:]' '[:lower:]')
+
+    log_debug "Sonarr lookup: [$1]"
+    _resp=$(_sonarr_get "/series/lookup?term=$(urlencode "$1")") || return
+    [ -z "$_resp" ] || [ "$_resp" = "[]" ] && return
+
+    log_debug "Sanitised search term: [$_var_clean]"
+    # SERIES_TITLE=$(get_title "$_var_clean")
+    IFS='|' read -r title tvdbId year tmdbId <<EOF
+    $(get_title "$_var_clean")
+EOF
+    # the EOF above must be in column 1
+    log_debug "Sonarr response: title=[$title] tvdbId=[$tvdbId] year=[$year] tmdbId=[$tmdbId] - via=[$_var_clean]"
+    SERIES_TITLE="${title#"${title%%[! ]*}"}"
+    if [ ! -z "$year" ]; then
+        SERIES_TITLE="$SERIES_TITLE ($year)"
+    fi
+    if [ ! -z "$tvdbId" ]; then
+        SERIES_TITLE="$SERIES_TITLE [tvdbid-$tvdbId]"
+        SERIES_ID="$tvdbId"
+    fi
+    if [ ! -z "$tmdbId" ]; then
+        SERIES_TITLE="$SERIES_TITLE [tmdbid-$tmdbId]"
+    fi
+    # SERIES_TITLE="${SERIES_TITLE#"${SERIES_TITLE%%[! ]*}"}"
+    log_info "Sonarr match: id=[$SERIES_ID] title=[$SERIES_TITLE] via=[$1]"
+    if [ -n "$SERIES_ID" ] && [ -n "$SERIES_TITLE" ]; then
+        return 0
+    fi
+    return 1
+}
+# shellcheck disable=SC2329
+find_sonarr_series_old() {
+    _LOG_CTX="find_sonarr_series"
     _var_f=$(_tmpfile "sv_var")
     _seen_f=$(_tmpfile "sv_seen")
     touch "$_seen_f"
@@ -364,28 +417,26 @@ find_sonarr_series() {
         [ -z "$_resp" ] || [ "$_resp" = "[]" ] && continue
 
         tmp=$(_tmpfile "json_resp")
-        set -x
         json_split "$_resp" > "$tmp"
-        set +x
 
         _best=""
         while IFS= read -r obj; do
-            set -x
             title=$(json_str "title" "$obj")
             clean=$(json_str "cleanTitle" "$obj")
             # tvdb=$(json_num "tvdbId" "$obj")
-            set +x
-
             # 1. Exact title match
             if [ "$title" = "$_var" ]; then
                 _best="$obj"
+                log_debug "Sonarr candidate: #1 match"
                 break
             fi
 
             # 2. Exact cleanTitle match
             _var_clean=$(printf '%s' "$_var" | tr -d ' .'"'" | tr '[:upper:]' '[:lower:]')
+            log_debug "Sonarr candidate: title=[$title] cleanTitle=[$clean] via=[$_var] and [$_var_clean]"
             if [ "$clean" = "$_var_clean" ]; then
                 _best="$obj"
+                log_debug "Sonarr candidate: #2 match"
                 break
             fi
 

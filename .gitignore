@@ -24,5 +24,7 @@ ehthumbs.db
 *.orig
 
 docker-transmission-4.0.5-r3-ls240.zip
-
+MODULARIZATION_ANALYSIS.md
+Sonarr API behavior.md
 symlink-videos-v*.sh
+debug_sonarr.sh
