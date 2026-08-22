@@ -380,14 +380,14 @@ EOF
     # the EOF above must be in column 1
     log_debug "Sonarr response: title=[$title] tvdbId=[$tvdbId] year=[$year] tmdbId=[$tmdbId] - via=[$_var_clean]"
     SERIES_TITLE="${title#"${title%%[! ]*}"}"
-    if [ ! -z "$year" ]; then
+    if [ -n "$year" ]; then
         SERIES_TITLE="$SERIES_TITLE ($year)"
     fi
-    if [ ! -z "$tvdbId" ]; then
+    if [ -n "$tvdbId" ]; then
         SERIES_TITLE="$SERIES_TITLE [tvdbid-$tvdbId]"
         SERIES_ID="$tvdbId"
     fi
-    if [ ! -z "$tmdbId" ]; then
+    if [ -n "$tmdbId" ]; then
         SERIES_TITLE="$SERIES_TITLE [tmdbid-$tmdbId]"
     fi
     # SERIES_TITLE="${SERIES_TITLE#"${SERIES_TITLE%%[! ]*}"}"
@@ -395,70 +395,6 @@ EOF
     if [ -n "$SERIES_ID" ] && [ -n "$SERIES_TITLE" ]; then
         return 0
     fi
-    return 1
-}
-# shellcheck disable=SC2329
-find_sonarr_series_old() {
-    _LOG_CTX="find_sonarr_series"
-    _var_f=$(_tmpfile "sv_var")
-    _seen_f=$(_tmpfile "sv_seen")
-    touch "$_seen_f"
-    _build_variants "$1" > "$_var_f"
-
-    while IFS= read -r _var; do
-        [ -z "$_var" ] && continue
-
-        _low=$(printf '%s' "$_var" | tr '[:upper:]' '[:lower:]')
-        grep -qxF "$_low" "$_seen_f" 2>/dev/null && continue
-        printf '%s\n' "$_low" >> "$_seen_f"
-
-        log_debug "Sonarr lookup: [$_var]"
-        _resp=$(_sonarr_get "/series/lookup?term=$(urlencode "$_var")") || continue
-        [ -z "$_resp" ] || [ "$_resp" = "[]" ] && continue
-
-        tmp=$(_tmpfile "json_resp")
-        json_split "$_resp" > "$tmp"
-
-        _best=""
-        while IFS= read -r obj; do
-            title=$(json_str "title" "$obj")
-            clean=$(json_str "cleanTitle" "$obj")
-            # tvdb=$(json_num "tvdbId" "$obj")
-            # 1. Exact title match
-            if [ "$title" = "$_var" ]; then
-                _best="$obj"
-                log_debug "Sonarr candidate: #1 match"
-                break
-            fi
-
-            # 2. Exact cleanTitle match
-            _var_clean=$(printf '%s' "$_var" | tr -d ' .'"'" | tr '[:upper:]' '[:lower:]')
-            log_debug "Sonarr candidate: title=[$title] cleanTitle=[$clean] via=[$_var] and [$_var_clean]"
-            if [ "$clean" = "$_var_clean" ]; then
-                _best="$obj"
-                log_debug "Sonarr candidate: #2 match"
-                break
-            fi
-
-            # # 3. Known TVDB ID for Ms. X
-            # if [ "$tvdb" = "464217" ]; then
-            #     _best="$obj"
-            #     break
-            # fi
-
-            # 4. Fallback: first object
-            [ -z "$_best" ] && _best="$obj"
-
-        done < "$tmp"
-
-        rm -f "$tmp"
-
-        SERIES_ID=$(json_num "id" "$_best")
-        SERIES_TITLE=$(json_str "title" "$_best")
-        log_info "Sonarr match: id=[$SERIES_ID] title=[$SERIES_TITLE] via=[$_var]"
-        return 0
-    done < "$_var_f"
-
     return 1
 }
 
