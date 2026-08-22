@@ -43,3 +43,4 @@ export DRY_RUN
 # Load the symlink-videos.sh script - have to do this after exporting TR_TORRENT_DIR and TR_TORRENT_NAME
 # shellcheck disable=SC1091
 . ./symlink-videos.sh
+ 
