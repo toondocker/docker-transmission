@@ -2,7 +2,7 @@
 # shellcheck shell=ash
 
 # ═══════════════════════════════════════════════════════════════════
-# postprocess.sh — Unified torrent post-process
+# symlink-videos.sh — Unified torrent post-process
 #
 # Handles TV releases (via Sonarr) and Movies / one-offs (via Radarr).
 # Creates Jellyfin-compatible symlinks in the correct directory layout.
@@ -151,36 +151,6 @@ json_split() {
 }
 
 
-get_title() {
-    search="$1"
-    printf '%s\n' "$_resp" |
-    awk -F'"' -v search="$search" '
-    /"title"[[:space:]]*:/ {
-        title = $4
-        tvdbId = ""
-        year = ""
-        tmdbId = ""
-    }
-    /"year"[[:space:]]*:/ {
-    match($0, /[0-9]+/)
-    year = substr($0, RSTART, RLENGTH)
-    }
-    /"tvdbId"[[:space:]]*:/ {
-    match($0, /[0-9]+/)
-    tvdbId = substr($0, RSTART, RLENGTH)
-    }
-    /"tmdbId"[[:space:]]*:/ {
-    match($0, /[0-9]+/)
-    tmdbId = substr($0, RSTART, RLENGTH)
-    }
-    /"cleanTitle"[[:space:]]*:/ {
-        if ($4 == search) {
-            print title "|" tvdbId "|" year "|" tmdbId
-            exit
-        }
-    }'
-}
-
 
 # ───────────────────────────────────────────────────────────────────
 # §4  RELEASE DETECTION
@@ -244,7 +214,7 @@ _cut_at_noise() {
         | sed 's/[[:space:]]*[Ss]eries[[:space:]_.+-]*[0-9].*//'         \
         | sed 's/[[:space:]]*[Ss]eason[[:space:]_.+-]*[0-9].*//'         \
         | sed 's/[[:space:]]*[12][0-9][0-9][0-9][^0-9].*//'             \
-        | sed 's/[[:space:]]*$//'
+        | sed 's/[[:space:]_.-]*$//'
 }
 
 # Note: split separator is "[.]" not "." — "." is a regex wildcard in awk
@@ -273,6 +243,26 @@ sanitise_title() {
     log_info  "Canonical title    : [$CANONICAL_TITLE]"
 }
 
+# Universal cleaning function applied to BOTH the torrent string AND the API strings
+# shellcheck disable=SC2329
+_universal_clean() {
+    # 1. Convert to lowercase
+    _clean=$(echo "$1" | tr '[:upper:]' '[:lower:]')
+
+    # 2. Convert common torrent separators (dots, dashes) to spaces, 
+    #    and drop colons so "Dark City: The Cleaner" matches "Dark City The Cleaner"
+    _clean=$(echo "$_clean" | sed 's/[.:\-_]/ /g')
+
+    # 3. Drop "the" if it is standalone after a space (replicates subtitle behavior)
+    _clean=$(echo "$_clean" | sed -E 's/[[:space:]]+the[[:space:]]+/ /g')
+
+    # 4. Remove ALL remaining spaces and non-alphanumeric characters
+    _clean=$(echo "$_clean" | sed 's/[^a-z0-9]//g')
+
+    log_debug "Cleaned title: [$_clean], from original: [$1]"
+
+    echo "$_clean"
+}
 
 # ───────────────────────────────────────────────────────────────────
 # §6  METADATA EXTRACTION  (season, episode, year)
@@ -312,42 +302,32 @@ extract_episode() {
 }
 
 extract_year() {
-    # Matches (YYYY) — parenthesised 4-digit year
-    printf '%s' "$1" \
-        | grep -oE '\([12][0-9]{3}\)' \
-        | grep -oE '[0-9]+' \
-        | head -1
+    _n="$1"
+
+    # 1. First priority: explicit parenthesised or bracketed year — (2024) or [2024]
+    _y=$(printf '%s' "$_n" | grep -oE '[\(\[][12][0-9]{3}[\)\]]' | grep -oE '[0-9]{4}' | head -1)
+    if [ -n "$_y" ]; then
+        printf '%s' "$_y"
+        return
+    fi
+
+    # 2. Second priority: 4-digit year (1900-2099) bounded by separators (dots, dashes, spaces)
+    # Scanning right-to-left ensures movies like "2001: A Space Odyssey (1968)" 
+    # or "Blade Runner 2049 (2017)" pick the release year rather than the title number.
+    printf '%s' "$_n" \
+        | tr '._+~()[]-' ' ' \
+        | awk '{
+            for (i = NF; i >= 1; i--) {
+                if ($i ~ /^(19[0-9]{2}|20[0-9]{2})$/) {
+                    print $i
+                    exit
+                }
+            }
+        }'
 }
 
-
 # ───────────────────────────────────────────────────────────────────
-# §7  TITLE VARIANTS
-#
-# Generates up to 5 normalised forms of a title so that a Sonarr or
-# Radarr lookup succeeds despite punctuation differences in the name.
-#
-#   v1: as-is          "Ms.X"
-#   v2: dots → spaces  "Ms X"
-#   v3: no dots        "MsX"
-#   v4: dot-space      "Ms. X"
-#   v5: no apostrophes (handles "It's" etc.)
-#
-# A case-insensitive seen-file prevents the same normalised form being
-# queried twice even when multiple variants collapse to the same string.
-# ───────────────────────────────────────────────────────────────────
-
-_build_variants() {
-    _t="$1"
-    printf '%s\n' "$_t"                                           # v1
-    printf '%s\n' "$_t" | tr '.' ' ' | sed 's/  */ /g; s/ *$//'   # v2
-    printf '%s\n' "$_t" | tr -d '.'                               # v3
-    printf '%s\n' "$_t" | sed 's/\.\([^ ]\)/. \1/g'               # v4
-    printf '%s\n' "$_t" | tr -d "'"                               # v5
-}
-
-
-# ───────────────────────────────────────────────────────────────────
-# §8  SONARR INTEGRATION
+# §7  SONARR INTEGRATION
 # ───────────────────────────────────────────────────────────────────
 
 _sonarr_get() {
@@ -358,52 +338,78 @@ _sonarr_get() {
         "${SONARR_URL}/api/v3${1}" 2>/dev/null
 }
 
+_sonarr_extract_series() {
+    _LOG_CTX="_sonarr_extract_series"
+    _search="$1"
+    log_debug "Searching for title: [$_search]"
+    printf '%s\n' "$_resp" |
+    awk -F'"' -v search="$_search" '
+    /"title"[[:space:]]*:/ {
+        _title = $4
+        _tvdbId = ""
+        _year = ""
+        _tmdbId = ""
+    }
+    /"year"[[:space:]]*:/ {
+    match($0, /[0-9]+/)
+    _year = substr($0, RSTART, RLENGTH)
+    }
+    /"tvdbId"[[:space:]]*:/ {
+    match($0, /[0-9]+/)
+    _tvdbId = substr($0, RSTART, RLENGTH)
+    }
+    /"tmdbId"[[:space:]]*:/ {
+    match($0, /[0-9]+/)
+    _tmdbId = substr($0, RSTART, RLENGTH)
+    }
+    /"cleanTitle"[[:space:]]*:/ {
+        _cleanTitle = $4
+        if (_cleanTitle == search) {
+            print _title "|" _tvdbId "|" _year "|" _tmdbId "|" _cleanTitle
+            exit
+        }
+    }'
+}
+
 # find_sonarr_series <title>
-# Tries each title variant in turn; stops on first hit.
 # Sets globals: SERIES_ID, SERIES_TITLE
 # Returns: 0 = found  1 = not found
 find_sonarr_series() {
     _LOG_CTX="find_sonarr_series"
-    _seen_f=$(_tmpfile "sv_seen")
-    touch "$_seen_f"
-    _var_clean=$(printf '%s' "$1" | tr -d ' .'"'" | tr '[:upper:]' '[:lower:]')
+    _var_clean=$(_universal_clean "$1")
 
     log_debug "Sonarr lookup: [$1]"
-    _resp=$(_sonarr_get "/series/lookup?term=$(urlencode "$1")") || return
-    [ -z "$_resp" ] || [ "$_resp" = "[]" ] && return
+    _resp=$(_sonarr_get "/series/lookup?term=$(urlencode "$1")") || return 1
+    [ -z "$_resp" ] || [ "$_resp" = "[]" ] && return 1
 
     log_debug "Sanitised search term: [$_var_clean]"
-    # SERIES_TITLE=$(get_title "$_var_clean")
-    IFS='|' read -r title tvdbId year tmdbId <<EOF
-    $(get_title "$_var_clean")
+    # the following 3 lines are deliberately in column 1
+IFS='|' read -r _title _tvdbId _year _tmdbId _cleanTitle <<EOF
+$(_sonarr_extract_series "$_var_clean")
 EOF
-    # the EOF above must be in column 1
-    log_debug "Sonarr response: title=[$title] tvdbId=[$tvdbId] year=[$year] tmdbId=[$tmdbId] - via=[$_var_clean]"
-    SERIES_TITLE="${title#"${title%%[! ]*}"}"
-    if [ -n "$year" ]; then
-        SERIES_TITLE="$SERIES_TITLE ($year)"
+    log_debug "Sonarr response: title=[$_title] tvdbId=[$_tvdbId] year=[$_year] tmdbId=[$_tmdbId] cleanTitle=[$_cleanTitle] - via=[$_var_clean]"
+    SERIES_TITLE="$_title"
+    if [ ! -z "$_year" ]; then
+        SERIES_TITLE="$SERIES_TITLE ($_year)"
     fi
-    if [ -n "$tvdbId" ]; then
-        SERIES_TITLE="$SERIES_TITLE [tvdbid-$tvdbId]"
-        SERIES_ID="$tvdbId"
+    if [ ! -z "$_tvdbId" ]; then
+        SERIES_TITLE="$SERIES_TITLE [tvdbid-$_tvdbId]"
     fi
-    if [ -n "$tmdbId" ]; then
-        SERIES_TITLE="$SERIES_TITLE [tmdbid-$tmdbId]"
+    if [ ! -z "$_tmdbId" ]; then
+        SERIES_TITLE="$SERIES_TITLE [tmdbid-$_tmdbId]"
     fi
-    # SERIES_TITLE="${SERIES_TITLE#"${SERIES_TITLE%%[! ]*}"}"
     log_info "Sonarr match: id=[$SERIES_ID] title=[$SERIES_TITLE] via=[$1]"
-    if [ -n "$SERIES_ID" ] && [ -n "$SERIES_TITLE" ]; then
+    if [ -n "$SERIES_TITLE" ]; then
         return 0
     fi
     return 1
 }
 
-# lookup_episode <season_num> <episode_num>
+# _sonarr_lookup_episode <season_num> <episode_num>
 # Requires SERIES_ID to already be set.
 # Sets global: EPISODE_TITLE
 # Returns: 0 = found  1 = not found
-lookup_episode() {
-    _LOG_CTX="lookup_episode"
+_sonarr_lookup_episode() {
     _sn="$1"; _en="$2"
     _ep_f=$(_tmpfile "ep_list")
 
@@ -428,8 +434,31 @@ lookup_episode() {
 
 
 # ───────────────────────────────────────────────────────────────────
-# §9  RADARR INTEGRATION
+# §8  RADARR INTEGRATION
 # ───────────────────────────────────────────────────────────────────
+# TITLE VARIANTS
+#
+# Generates up to 5 normalised forms of a title so that a 
+# Radarr lookup succeeds despite punctuation differences in the name.
+#
+#   v1: as-is          "Ms.X"
+#   v2: dots → spaces  "Ms X"
+#   v3: no dots        "MsX"
+#   v4: dot-space      "Ms. X"
+#   v5: no apostrophes (handles "It's" etc.)
+#
+# A case-insensitive seen-file prevents the same normalised form being
+# queried twice even when multiple variants collapse to the same string.
+# ───────────────────────────────────────────────────────────────────
+
+_build_variants() {
+    _t="$1"
+    printf '%s\n' "$_t"                                           # v1
+    printf '%s\n' "$_t" | tr '.' ' ' | sed 's/  */ /g; s/ *$//'   # v2
+    printf '%s\n' "$_t" | tr -d '.'                               # v3
+    printf '%s\n' "$_t" | sed 's/\.\([^ ]\)/. \1/g'               # v4
+    printf '%s\n' "$_t" | tr -d "'"                               # v5
+}
 
 _radarr_get() {
     # _radarr_get <api_path>  →  stdout: response body
@@ -450,8 +479,8 @@ find_radarr_movie() {
     _LOG_CTX="find_radarr_movie"
     _title="$1"; _year="${2:-}"
     _var_f=$(_tmpfile "rv_var")
-    _seen_f=$(_tmpfile "rv_seen")
     _resp_f=$(_tmpfile "rv_resp")
+    _seen_f=$(_tmpfile "rv_seen")
     touch "$_seen_f"
     _build_variants "$_title" > "$_var_f"
 
@@ -493,30 +522,33 @@ find_radarr_movie() {
 
 
 # ───────────────────────────────────────────────────────────────────
-# §10  FILE DISCOVERY
+# §9  FILE DISCOVERY
 # ───────────────────────────────────────────────────────────────────
+
+# Helper: check if file has a recognized video extension (case-insensitive)
+_is_video_file() {
+    _ext=$(printf '%s' "${1##*.}" | tr '[:upper:]' '[:lower:]')
+    case " $VIDEO_EXTS " in
+        *" $_ext "*) return 0 ;;
+        *)           return 1 ;;
+    esac
+}
 
 # find_video_files <path>  →  one absolute video-file path per line
 find_video_files() {
     _p="$1"
     if [ -f "$_p" ]; then
-        _ext="${_p##*.}"
-        for _e in $VIDEO_EXTS; do
-            [ "$_ext" = "$_e" ] && { printf '%s\n' "$_p"; return 0; }
-        done
+        _is_video_file "$_p" && printf '%s\n' "$_p"
     elif [ -d "$_p" ]; then
         find "$_p" -type f | while IFS= read -r _f; do
-            _ext="${_f##*.}"
-            for _e in $VIDEO_EXTS; do
-                [ "$_ext" = "$_e" ] && printf '%s\n' "$_f"
-            done
+            [ -z "$_f" ] && continue
+            _is_video_file "$_f" && printf '%s\n' "$_f"
         done
     fi
 }
 
-
 # ───────────────────────────────────────────────────────────────────
-# §11  SYMLINK HELPERS
+# §10  SYMLINK HELPERS
 # ───────────────────────────────────────────────────────────────────
 
 # _safe_dirname <str>  →  filesystem-safe directory name
@@ -578,7 +610,7 @@ _link_files() {
 
 
 # ───────────────────────────────────────────────────────────────────
-# §12  HIGH-LEVEL HANDLERS
+# §11  HIGH-LEVEL HANDLERS
 #
 # Each handler owns its full workflow end-to-end:
 #   extract metadata → resolve in *arr → find files → create symlinks
@@ -601,9 +633,11 @@ handle_tv() {
         || die "No Sonarr series found for: [$CANONICAL_TITLE]" 20
 
     # 3. Resolve the episode title in Sonarr (informational; non-fatal)
-    if [ -n "$SEASON_NUM" ] && [ -n "$EPISODE_NUM" ]; then
-        lookup_episode "$SEASON_NUM" "$EPISODE_NUM" \
+    if [ -n "$SERIES_ID" ] && [ -n "$SEASON_NUM" ] && [ -n "$EPISODE_NUM" ]; then
+        _sonarr_lookup_episode "$SEASON_NUM" "$EPISODE_NUM" \
             || log_warn "S$(pad2 "$SEASON_NUM")E$(pad2 "$EPISODE_NUM") not found in Sonarr (may not have aired yet)"
+    elif [ -z "$SERIES_ID" ] && [ -n "$SEASON_NUM" ] && [ -n "$EPISODE_NUM" ]; then
+        log_info "Series not in local Sonarr library — skipping episode title lookup"
     elif [ -n "$SEASON_NUM" ]; then
         log_info "Season pack — no individual episode number"
     else
