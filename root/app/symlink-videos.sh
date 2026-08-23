@@ -389,13 +389,13 @@ $(_sonarr_extract_series "$_var_clean")
 EOF
     log_debug "Sonarr response: title=[$_title] tvdbId=[$_tvdbId] year=[$_year] tmdbId=[$_tmdbId] cleanTitle=[$_cleanTitle] - via=[$_var_clean]"
     SERIES_TITLE="$_title"
-    if [ ! -z "$_year" ]; then
+    if [ ! -n "$_year" ]; then
         SERIES_TITLE="$SERIES_TITLE ($_year)"
     fi
-    if [ ! -z "$_tvdbId" ]; then
+    if [ ! -n "$_tvdbId" ]; then
         SERIES_TITLE="$SERIES_TITLE [tvdbid-$_tvdbId]"
     fi
-    if [ ! -z "$_tmdbId" ]; then
+    if [ ! -n "$_tmdbId" ]; then
         SERIES_TITLE="$SERIES_TITLE [tmdbid-$_tmdbId]"
     fi
     log_info "Sonarr match: id=[$SERIES_ID] title=[$SERIES_TITLE] via=[$1]"
