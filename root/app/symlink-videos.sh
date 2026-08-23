@@ -392,10 +392,10 @@ EOF
     if [ ! -n "$_year" ]; then
         SERIES_TITLE="$SERIES_TITLE ($_year)"
     fi
-    if [ ! -n "$_tvdbId" ]; then
+    if [ ! -z "$_tvdbId" ]; then
         SERIES_TITLE="$SERIES_TITLE [tvdbid-$_tvdbId]"
     fi
-    if [ ! -n "$_tmdbId" ]; then
+    if [ ! -z "$_tmdbId" ]; then
         SERIES_TITLE="$SERIES_TITLE [tmdbid-$_tmdbId]"
     fi
     log_info "Sonarr match: id=[$SERIES_ID] title=[$SERIES_TITLE] via=[$1]"
