@@ -3,9 +3,18 @@
 # ./test_symlink.sh  "/downloads/complete/Prog at the BBC (2009).SD.AVC.AAC.eng.mkv"
 # ./test_symlink.sh  "/downloads/complete/Ms.X Series 1 (2026) [540p mp4] [NZ]/Ms.X S01E01 [540p mp4].mp4"
 # Test a folder with mixed junk
-# ./test_symlink.sh  "/downloads/complete/Ms.X Series 1 (2026) [540p mp4] [NZ]"
+# ./test_symlink.sh  "/downloads/complete/Dark City The Cleaner - Series 1 (2026) [540p mp4] [NZ]"
 # Test a folder 
 # ./test_symlink.sh  "/downloads/complete/The Rapture Series 1 (2026) [540p]"
+
+# ./test_symlink.sh  "/downloads/complete/Radio 1 At Reading And Leeds Festival 2026 Fontaines DC (28 Aug 2026) [WEBRip 540p subs mkv].mkv"
+# ./test_symlink.sh  "/downloads/complete/Radio 1 At Reading And Leeds Festival 2026 Geese (28 Aug 2026) [WEBRip 540p mkv].mkv"
+
+# wget -q -O - \
+#         --header="X-Api-Key: apiKey" \
+#         --header="Accept: application/json" \
+#         "http://sonarr:8989/api/v3/series/lookup?term=show%20name" | more
+
 # ------------------------------------------------------------------------------------ 
 # Delete one symlink	            rm symlink
 # Delete all symlinks in a folder	find folder -type l -delete

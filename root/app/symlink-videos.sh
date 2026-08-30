@@ -35,6 +35,9 @@
 #   30  symlink creation failure
 # ═══════════════════════════════════════════════════════════════════
 
+set -eu
+# Enable pipefail safely if supported by the shell environment
+(set -o pipefail 2>/dev/null) && set -o pipefail || true
 
 # ───────────────────────────────────────────────────────────────────
 # §1  CONFIGURATION
@@ -75,7 +78,7 @@ _LOG_CTX="main"
 
 _tmpfile() {
     if [ -z "$_TMPDIR" ]; then
-        _TMPDIR=$(mktemp -d /tmp/postproc.XXXXXX) \
+        _TMPDIR=$(mktemp -d /tmp/postproc_tmp.XXXXXX) \
             || { printf 'FATAL: mktemp failed\n' >&2; exit 1; }
     fi
     printf '%s/%s' "$_TMPDIR" "$1"
@@ -83,8 +86,10 @@ _tmpfile() {
 
 # shellcheck disable=SC2329,SC2317
 _cleanup() {
-    # Delete only our own temp files
-    rm -rf /tmp/postproc.* 2>/dev/null
+    # Delete only our own temp directory (never delete LOG_FILE)
+    if [ -n "$_TMPDIR" ] && [ -d "$_TMPDIR" ]; then
+        rm -rf "$_TMPDIR" 2>/dev/null
+    fi
 }
 trap _cleanup EXIT HUP INT TERM
 
@@ -131,7 +136,7 @@ json_str() {
     printf '%s' "$2" \
         | tr '\n' ' ' \
         | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" \
-        | head -1
+        | head -n 1
 }
 
 # json_num <key> <json>  →  numeric / bool / null value, unquoted
@@ -139,15 +144,15 @@ json_num() {
     printf '%s' "$2" \
         | tr '\n' ' ' \
         | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p" \
-        | head -1
+        | head -n 1
 }
 
 # json_split <json_array>  →  one top-level object per stdout line
 json_split() {
     printf '%s' "$1" \
         | tr '\n' ' ' \
-        | sed 's/^\[//; s/\]$//' \
-        | sed 's/},[[:space:]]*{/}\n{/g'
+        | sed 's/^[[:space:]]*\[[[:space:]]*//; s/[[:space:]]*\][[:space:]]*$//' \
+        | awk '{ gsub(/},[[:space:]]*{/, "}\n{"); print }'
 }
 
 
@@ -237,6 +242,7 @@ _expand_separator_dots() {
 # sanitise_title <raw_name>  →  sets global CANONICAL_TITLE
 sanitise_title() {
     _LOG_CTX="sanitise_title"
+    local _prefix
     _prefix=$(_cut_at_noise "$1")
     log_debug "Title prefix (raw) : [$_prefix]"
     CANONICAL_TITLE=$(_expand_separator_dots "$_prefix")
@@ -244,24 +250,24 @@ sanitise_title() {
 }
 
 # Universal cleaning function applied to BOTH the torrent string AND the API strings
-# shellcheck disable=SC2329
 _universal_clean() {
+    local _clean
     # 1. Convert to lowercase
-    _clean=$(echo "$1" | tr '[:upper:]' '[:lower:]')
+    _clean=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
 
     # 2. Convert common torrent separators (dots, dashes) to spaces, 
     #    and drop colons so "Dark City: The Cleaner" matches "Dark City The Cleaner"
-    _clean=$(echo "$_clean" | sed 's/[.:\-_]/ /g')
+    _clean=$(printf '%s' "$_clean" | sed 's/[.:\-_]/ /g')
 
     # 3. Drop "the" if it is standalone after a space (replicates subtitle behavior)
-    _clean=$(echo "$_clean" | sed -E 's/[[:space:]]+the[[:space:]]+/ /g')
+    _clean=$(printf '%s' "$_clean" | sed -E 's/[[:space:]]+the[[:space:]]+/ /g')
 
     # 4. Remove ALL remaining spaces and non-alphanumeric characters
-    _clean=$(echo "$_clean" | sed 's/[^a-z0-9]//g')
+    _clean=$(printf '%s' "$_clean" | sed 's/[^a-z0-9]//g')
 
     log_debug "Cleaned title: [$_clean], from original: [$1]"
 
-    echo "$_clean"
+    printf '%s' "$_clean"
 }
 
 # ───────────────────────────────────────────────────────────────────
@@ -269,43 +275,46 @@ _universal_clean() {
 # ───────────────────────────────────────────────────────────────────
 
 extract_season() {
-    _n="$1"
+    local _n="$1"
+    local _v
     # "Series N" / "Season N" with any separator
     _v=$(printf '%s' "$_n" \
          | grep -oiE '(Series|Season)[[:space:]_.+-]*[0-9]+' \
-         | grep -oE '[0-9]+' | head -1)
+         | grep -oE '[0-9]+' | head -n 1 || true)
     [ -n "$_v" ] && { printf '%s' "$_v"; return; }
     # SxxExx
     _v=$(printf '%s' "$_n" \
          | grep -oiE '[Ss][0-9]+[Ee][0-9]+' \
-         | sed 's/[Ss]\([0-9]*\)[Ee].*/\1/' | head -1)
+         | sed 's/[Ss]\([0-9]*\)[Ee].*/\1/' | head -n 1 || true)
     [ -n "$_v" ] && { printf '%s' "$_v"; return; }
     # NxNN
     _v=$(printf '%s' "$_n" \
-         | grep -oE '[0-9]+x[0-9]+' | sed 's/x.*//' | head -1)
+         | grep -oE '[0-9]+x[0-9]+' | sed 's/x.*//' | head -n 1 || true)
     [ -n "$_v" ] && { printf '%s' "$_v"; return; }
     printf ''
 }
 
 extract_episode() {
-    _n="$1"
+    local _n="$1"
+    local _v
     # SxxExx
     _v=$(printf '%s' "$_n" \
          | grep -oiE '[Ss][0-9]+[Ee][0-9]+' \
-         | sed 's/.*[Ee]\([0-9]*\)/\1/' | head -1)
+         | sed 's/.*[Ee]\([0-9]*\)/\1/' | head -n 1 || true)
     [ -n "$_v" ] && { printf '%s' "$_v"; return; }
     # NxNN
     _v=$(printf '%s' "$_n" \
-         | grep -oE '[0-9]+x[0-9]+' | sed 's/.*x//' | head -1)
+         | grep -oE '[0-9]+x[0-9]+' | sed 's/.*x//' | head -n 1 || true)
     [ -n "$_v" ] && { printf '%s' "$_v"; return; }
     printf ''
 }
 
 extract_year() {
-    _n="$1"
+    local _n="$1"
+    local _y
 
     # 1. First priority: explicit parenthesised or bracketed year — (2024) or [2024]
-    _y=$(printf '%s' "$_n" | grep -oE '[\(\[][12][0-9]{3}[\)\]]' | grep -oE '[0-9]{4}' | head -1)
+    _y=$(printf '%s' "$_n" | grep -oE '[\(\[][12][0-9]{3}[\)\]]' | grep -oE '[0-9]{4}' | head -n 1 || true)
     if [ -n "$_y" ]; then
         printf '%s' "$_y"
         return
@@ -340,10 +349,16 @@ _sonarr_get() {
 
 _sonarr_extract_series() {
     _LOG_CTX="_sonarr_extract_series"
-    _search="$1"
-    log_debug "Searching for title: [$_search]"
-    printf '%s\n' "$_resp" |
-    awk -F'"' -v search="$_search" '
+    local _json="$1"
+    local _search="$2"
+    local _season="$3"
+    log_debug "Searching for title: [$_search] and season: [$_season]"
+    printf '%s\n' "$_json" |
+
+    # split each ," and {" onto a new line, normalizing any minified JSON response into
+    # separate lines so that $4 always correctly refers to the value of that specific key
+    sed 's/,"/,\n"/g; s/{"/{\n"/g' |
+    awk -F'"' -v search="$_search" -v min_seasons="$_season" '
     /"title"[[:space:]]*:/ {
         _title = $4
         _tvdbId = ""
@@ -351,20 +366,28 @@ _sonarr_extract_series() {
         _tmdbId = ""
     }
     /"year"[[:space:]]*:/ {
-    match($0, /[0-9]+/)
-    _year = substr($0, RSTART, RLENGTH)
+        match($0, /[0-9]+/)
+        _year = substr($0, RSTART, RLENGTH)
     }
     /"tvdbId"[[:space:]]*:/ {
-    match($0, /[0-9]+/)
-    _tvdbId = substr($0, RSTART, RLENGTH)
+        match($0, /[0-9]+/)
+        _tvdbId = substr($0, RSTART, RLENGTH)
     }
     /"tmdbId"[[:space:]]*:/ {
-    match($0, /[0-9]+/)
-    _tmdbId = substr($0, RSTART, RLENGTH)
+        match($0, /[0-9]+/)
+        _tmdbId = substr($0, RSTART, RLENGTH)
     }
     /"cleanTitle"[[:space:]]*:/ {
         _cleanTitle = $4
-        if (_cleanTitle == search) {
+        _cleanTitle_cmp = _cleanTitle
+        if (match(_cleanTitle_cmp, /[0-9]{4}$/)) {
+            _cleanTitle_cmp = substr(_cleanTitle_cmp, 1, RSTART - 1)
+        } 
+    }
+    /"seasonCount"[[:space:]]*:/ {
+        match($0, /[0-9]+/)
+        _seasonCount = substr($0, RSTART, RLENGTH) + 0
+        if ((_cleanTitle_cmp == search || _cleanTitle == search) && _seasonCount >= min_seasons) {
             print _title "|" _tvdbId "|" _year "|" _tmdbId "|" _cleanTitle
             exit
         }
@@ -376,26 +399,32 @@ _sonarr_extract_series() {
 # Returns: 0 = found  1 = not found
 find_sonarr_series() {
     _LOG_CTX="find_sonarr_series"
+    local _var_clean
     _var_clean=$(_universal_clean "$1")
 
     log_debug "Sonarr lookup: [$1]"
+    local _resp
     _resp=$(_sonarr_get "/series/lookup?term=$(urlencode "$1")") || return 1
     [ -z "$_resp" ] || [ "$_resp" = "[]" ] && return 1
 
-    log_debug "Sanitised search term: [$_var_clean]"
+    log_debug "Sanitised search term: [$_var_clean]/[$SEASON_NUM]"
+    local _title="" _tvdbId="" _year="" _tmdbId="" _cleanTitle=""
     # the following 3 lines are deliberately in column 1
 IFS='|' read -r _title _tvdbId _year _tmdbId _cleanTitle <<EOF
-$(_sonarr_extract_series "$_var_clean")
+$(_sonarr_extract_series "$_resp" "$_var_clean" "$SEASON_NUM")
 EOF
     log_debug "Sonarr response: title=[$_title] tvdbId=[$_tvdbId] year=[$_year] tmdbId=[$_tmdbId] cleanTitle=[$_cleanTitle] - via=[$_var_clean]"
     SERIES_TITLE="$_title"
     if [ -n "$_year" ]; then
-        SERIES_TITLE="$SERIES_TITLE ($_year)"
+        case "$SERIES_TITLE" in
+            *" ($_year)") ;;
+            *) SERIES_TITLE="$SERIES_TITLE ($_year)" ;;
+        esac
     fi
-    if [ -n "$_tvdbId" ]; then
+    if [ -n "$_tvdbId" ] && [ "$_tvdbId" != "0" ]; then
         SERIES_TITLE="$SERIES_TITLE [tvdbid-$_tvdbId]"
     fi
-    if [ -n "$_tmdbId" ]; then
+    if [ -n "$_tmdbId" ] && [ "$_tmdbId" != "0" ]; then
         SERIES_TITLE="$SERIES_TITLE [tmdbid-$_tmdbId]"
     fi
     log_info "Sonarr match: id=[$SERIES_ID] title=[$SERIES_TITLE] via=[$1]"
@@ -410,15 +439,20 @@ EOF
 # Sets global: EPISODE_TITLE
 # Returns: 0 = found  1 = not found
 _sonarr_lookup_episode() {
-    _sn="$1"; _en="$2"
+    local _sn="$1"
+    local _en="$2"
+    local _ep_f
     _ep_f=$(_tmpfile "ep_list")
 
+    local _resp
     _resp=$(_sonarr_get "/episode?seriesId=${SERIES_ID}&seasonNumber=${_sn}") || return 1
     [ -z "$_resp" ] || [ "$_resp" = "[]" ] && return 1
     json_split "$_resp" > "$_ep_f"
 
+    local _want
     _want=$(strip_zeros "$_en")
     EPISODE_TITLE=""
+    local _ep _got
     while IFS= read -r _ep; do
         [ -z "$_ep" ] && continue
         _got=$(strip_zeros "$(json_num "episodeNumber" "$_ep")")
@@ -452,7 +486,7 @@ _sonarr_lookup_episode() {
 # ───────────────────────────────────────────────────────────────────
 
 _build_variants() {
-    _t="$1"
+    local _t="$1"
     printf '%s\n' "$_t"                                           # v1
     printf '%s\n' "$_t" | tr '.' ' ' | sed 's/  */ /g; s/ *$//'   # v2
     printf '%s\n' "$_t" | tr -d '.'                               # v3
@@ -477,13 +511,16 @@ _radarr_get() {
 # Returns: 0 = found  1 = not found
 find_radarr_movie() {
     _LOG_CTX="find_radarr_movie"
-    _title="$1"; _year="${2:-}"
+    local _title="$1"
+    local _year="${2:-}"
+    local _var_f _resp_f _seen_f
     _var_f=$(_tmpfile "rv_var")
     _resp_f=$(_tmpfile "rv_resp")
     _seen_f=$(_tmpfile "rv_seen")
     touch "$_seen_f"
     _build_variants "$_title" > "$_var_f"
 
+    local _var _low _query _resp _obj _o
     while IFS= read -r _var; do
         [ -z "$_var" ] && continue
 
@@ -508,7 +545,7 @@ find_radarr_movie() {
             done < "$_resp_f"
         fi
         # Fall back to first result when no year match
-        [ -z "$_obj" ] && _obj=$(head -1 "$_resp_f")
+        [ -z "$_obj" ] && _obj=$(head -n 1 "$_resp_f")
         [ -z "$_obj" ] && continue
 
         MOVIE_TITLE=$(json_str "title" "$_obj")
@@ -527,6 +564,7 @@ find_radarr_movie() {
 
 # Helper: check if file has a recognized video extension (case-insensitive)
 _is_video_file() {
+    local _ext
     _ext=$(printf '%s' "${1##*.}" | tr '[:upper:]' '[:lower:]')
     case " $VIDEO_EXTS " in
         *" $_ext "*) return 0 ;;
@@ -536,7 +574,8 @@ _is_video_file() {
 
 # find_video_files <path>  →  one absolute video-file path per line
 find_video_files() {
-    _p="$1"
+    local _p="$1"
+    local _f
     if [ -f "$_p" ]; then
         _is_video_file "$_p" && printf '%s\n' "$_p"
     elif [ -d "$_p" ]; then
@@ -561,7 +600,9 @@ _safe_dirname() {
 # Returns: 0 = ok  1 = error
 _make_symlink() {
     _LOG_CTX="_make_symlink"
-    _src="$1"; _ddir="$2"
+    local _src="$1"
+    local _ddir="$2"
+    local _dst
     _dst="${_ddir}/$(basename "$_src")"
 
     if [ "$DRY_RUN" = "1" ]; then
@@ -594,11 +635,14 @@ _make_symlink() {
 # Returns: 0 = all ok  1 = one or more failed
 _link_files() {
     _LOG_CTX="_link_files"
-    _list="$1"; _dir="$2"
+    local _list="$1"
+    local _dir="$2"
+    local _err_f _vf _c _errs
     _err_f=$(_tmpfile "link_errs")
     printf '0' > "$_err_f"
 
     while IFS= read -r _vf; do
+        [ -z "$_vf" ] && continue
         _make_symlink "$_vf" "$_dir" \
             || { _c=$(cat "$_err_f"); printf '%d' "$((_c + 1))" > "$_err_f"; }
     done < "$_list"
@@ -645,6 +689,7 @@ handle_tv() {
     fi
 
     # 4. Find every video file inside the torrent path
+    local _vf_list _f
     _vf_list=$(_tmpfile "tv_videos")
     find_video_files "$TORRENT_PATH" > "$_vf_list"
     [ -s "$_vf_list" ] || die "No video files found in: $TORRENT_PATH" 30
@@ -652,6 +697,7 @@ handle_tv() {
 
     # 5. Build the target directory and create symlinks
     #    Layout: <TV_ROOT>/<Series Title>/Season NN/
+    local _dest
     _dest="${JELLYFIN_TV_ROOT}/$(_safe_dirname "$SERIES_TITLE")/Season $(pad2 "${SEASON_NUM:-0}")"
     log_info "Target dir : [$_dest]"
     _link_files "$_vf_list" "$_dest" || exit 30
@@ -676,6 +722,7 @@ handle_movie() {
     fi
 
     # 3. Find every video file inside the torrent path
+    local _vf_list _f
     _vf_list=$(_tmpfile "mv_videos")
     find_video_files "$TORRENT_PATH" > "$_vf_list"
     [ -s "$_vf_list" ] || die "No video files found in: $TORRENT_PATH" 30
@@ -684,6 +731,7 @@ handle_movie() {
     # 4. Build the target directory and create symlinks
     #    Layout: <MOVIES_ROOT>/<Title> (YEAR)/
     #    Jellyfin requires the year in the folder name for correct matching.
+    local _movie_dir _dest
     _movie_dir="${MOVIE_TITLE}${MOVIE_YEAR:+ (${MOVIE_YEAR})}"
     _dest="${JELLYFIN_MOVIES_ROOT}/$(_safe_dirname "$_movie_dir")"
     log_info "Target dir : [$_dest]"
@@ -695,25 +743,32 @@ handle_movie() {
 #  MAINLINE
 # ═══════════════════════════════════════════════════════════════════
 
-[ -z "$TR_TORRENT_NAME" ] && die "TR_TORRENT_NAME is not set (run via Transmission?)" 1
-[ -z "$TR_TORRENT_DIR"  ] && die "TR_TORRENT_DIR is not set (run via Transmission?)" 1
+main() {
+    [ -z "${TR_TORRENT_NAME:-}" ] && die "TR_TORRENT_NAME is not set (run via Transmission?)" 1
+    [ -z "${TR_TORRENT_DIR:-}"  ] && die "TR_TORRENT_DIR is not set (run via Transmission?)" 1
 
-TORRENT_NAME="$TR_TORRENT_NAME"
-TORRENT_PATH="${TR_TORRENT_DIR}/${TR_TORRENT_NAME}"
+    TORRENT_NAME="$TR_TORRENT_NAME"
+    TORRENT_PATH="${TR_TORRENT_DIR}/${TR_TORRENT_NAME}"
 
-log_info "========================================================"
-log_info "=== postprocess start"
-log_info "Torrent name : [$TORRENT_NAME]"
-log_info "Torrent path : [$TORRENT_PATH]"
+    log_info "========================================================"
+    log_info "=== postprocess start"
+    log_info "Torrent name : [$TORRENT_NAME]"
+    log_info "Torrent path : [$TORRENT_PATH]"
 
-RELEASE_TYPE=$(classify "$TORRENT_NAME")
-log_info "Release type : [$RELEASE_TYPE]"
+    RELEASE_TYPE=$(classify "$TORRENT_NAME")
+    log_info "Release type : [$RELEASE_TYPE]"
 
-case "$RELEASE_TYPE" in
-    tv)    handle_tv    ;;
-    movie) handle_movie ;;
-    *)     die "Unrecognised release type: [$RELEASE_TYPE]" 10 ;;
-esac
+    case "$RELEASE_TYPE" in
+        tv)    handle_tv    ;;
+        movie) handle_movie ;;
+        *)     die "Unrecognised release type: [$RELEASE_TYPE]" 10 ;;
+    esac
 
-log_info "=== postprocess complete (OK)"
-exit 0
+    log_info "=== postprocess complete (OK)"
+    exit 0
+}
+
+# Main execution gate — allows sourcing for automated unit testing
+if [ -z "${SOURCED:-}" ]; then
+    main "$@"
+fi
