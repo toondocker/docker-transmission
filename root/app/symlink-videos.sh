@@ -37,6 +37,7 @@
 
 set -eu
 # Enable pipefail safely if supported by the shell environment
+# shellcheck disable=SC2015
 (set -o pipefail 2>/dev/null) && set -o pipefail || true
 
 # ───────────────────────────────────────────────────────────────────
