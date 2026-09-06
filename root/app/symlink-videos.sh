@@ -173,6 +173,7 @@ json_split() {
 
 _is_tv() {
     printf '%s' "$1" | grep -qiE '[Ss][0-9]{1,2}[Ee][0-9]{1,2}'           && return 0
+    printf '%s' "$1" | grep -qE '(^|[[:space:]_.-])[Ss][0-9]{1,2}([[:space:]_.+-]|$)' && return 0
     printf '%s' "$1" | grep -qE  '[0-9]{1,2}x[0-9]{1,2}'                  && return 0
     printf '%s' "$1" | grep -qiE '(Series|Season)[[:space:]_.+-]*[0-9]+'  && return 0
     printf '%s' "$1" | grep -qiE '(Complete|Full)[[:space:]_.+-]*Series'  && return 0

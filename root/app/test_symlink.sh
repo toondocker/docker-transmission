@@ -15,6 +15,9 @@
 #         --header="Accept: application/json" \
 #         "http://sonarr:8989/api/v3/series/lookup?term=show%20name" | more
 
+# move a symlink to a new location
+# mv "/movie-links/The Airport Chaplain (2026)/The Airport Chaplain S01E02 subs SD.mp4" "/video-links/The Airport Chaplain (2026) [tvdbid-475580] [tmdbid-326879]/The Airport Chaplain S01E02 subs SD.mp4"
+
 # ------------------------------------------------------------------------------------ 
 # Delete one symlink	            rm symlink
 # Delete all symlinks in a folder	find folder -type l -delete
