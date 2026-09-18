@@ -215,11 +215,12 @@ classify() {
 
 _cut_at_noise() {
     printf '%s' "$1" \
-        | sed 's/[[(].*//'                                               \
+        | sed 's/[[(].*//'                                              \
         | sed 's/[[:space:]]*[Ss][0-9][0-9]*[Ee][0-9][0-9]*.*//'        \
+        | sed 's/[[:space:]]*[Ss][0-9][0-9]*.*//'                       \
         | sed 's/[[:space:]]*[0-9][0-9]*x[0-9][0-9]*.*//'               \
-        | sed 's/[[:space:]]*[Ss]eries[[:space:]_.+-]*[0-9].*//'         \
-        | sed 's/[[:space:]]*[Ss]eason[[:space:]_.+-]*[0-9].*//'         \
+        | sed 's/[[:space:]]*[Ss]eries[[:space:]_.+-]*[0-9].*//'        \
+        | sed 's/[[:space:]]*[Ss]eason[[:space:]_.+-]*[0-9].*//'        \
         | sed 's/[[:space:]]*[12][0-9][0-9][0-9][^0-9].*//'             \
         | sed 's/[[:space:]_.-]*$//'
 }
@@ -264,7 +265,10 @@ _universal_clean() {
     # 3. Drop "the" if it is standalone after a space (replicates subtitle behavior)
     _clean=$(printf '%s' "$_clean" | sed -E 's/[[:space:]]+the[[:space:]]+/ /g')
 
-    # 4. Remove ALL remaining spaces and non-alphanumeric characters
+    # 4. Drop "and" if it is standalone after a space
+    _clean=$(printf '%s' "$_clean" | sed -E 's/[[:space:]]+and[[:space:]]+/ /g')
+
+    # 5. Remove ALL remaining spaces and non-alphanumeric characters
     _clean=$(printf '%s' "$_clean" | sed 's/[^a-z0-9]//g')
 
     log_debug "Cleaned title: [$_clean], from original: [$1]"
@@ -359,13 +363,18 @@ _sonarr_extract_series() {
 
     # split each ," and {" onto a new line, normalizing any minified JSON response into
     # separate lines so that $4 always correctly refers to the value of that specific key
-    sed 's/,"/,\n"/g; s/{"/{\n"/g' |
+    sed 's/,[[:space:]]*"/,\n"/g; s/{[[:space:]]*"/{\n"/g' |
     awk -F'"' -v search="$_search" -v min_seasons="$_season" '
     /"title"[[:space:]]*:/ {
         _title = $4
         _tvdbId = ""
         _year = ""
         _tmdbId = ""
+        _status = ""
+        _cleanTitle = ""
+    }
+    /"status"[[:space:]]*:/ {
+        _status = $4
     }
     /"year"[[:space:]]*:/ {
         match($0, /[0-9]+/)
@@ -382,17 +391,22 @@ _sonarr_extract_series() {
     /"cleanTitle"[[:space:]]*:/ {
         _cleanTitle = $4
         _cleanTitle_cmp = _cleanTitle
-        if (match(_cleanTitle_cmp, /[0-9]{4}$/)) {
-            _cleanTitle_cmp = substr(_cleanTitle_cmp, 1, RSTART - 1)
-        } 
+        sub(/[0-9][0-9][0-9][0-9]$/, "", _cleanTitle_cmp)
     }
     /"seasonCount"[[:space:]]*:/ {
         match($0, /[0-9]+/)
         _seasonCount = substr($0, RSTART, RLENGTH) + 0
         if ((_cleanTitle_cmp == search || _cleanTitle == search) && _seasonCount >= min_seasons) {
-            print _title "|" _tvdbId "|" _year "|" _tmdbId "|" _cleanTitle
-            exit
+            # Prefer a continuing series when several candidates match.
+            _score = (_status == "continuing") ? 2 : 1
+            if (_score > _best_score) {
+                _best_score = _score
+                _best = _title "|" _tvdbId "|" _year "|" _tmdbId "|" _cleanTitle
+            }
         }
+    }
+    END {
+        if (_best_score > 0) print _best
     }'
 }
 
