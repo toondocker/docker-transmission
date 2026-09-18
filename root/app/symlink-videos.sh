@@ -244,12 +244,14 @@ _expand_separator_dots() {
 
 # sanitise_title <raw_name>  →  sets global CANONICAL_TITLE
 sanitise_title() {
+    local _previous_log_ctx="$_LOG_CTX"
     _LOG_CTX="sanitise_title"
     local _prefix
     _prefix=$(_cut_at_noise "$1")
     log_debug "Title prefix (raw) : [$_prefix]"
     CANONICAL_TITLE=$(_expand_separator_dots "$_prefix")
     log_info  "Canonical title    : [$CANONICAL_TITLE]"
+    _LOG_CTX="$_previous_log_ctx"
 }
 
 # Universal cleaning function applied to BOTH the torrent string AND the API strings
@@ -354,6 +356,7 @@ _sonarr_get() {
 }
 
 _sonarr_extract_series() {
+    local _previous_log_ctx="$_LOG_CTX"
     _LOG_CTX="_sonarr_extract_series"
     local _json="$1"
     local _search="$2"
@@ -407,21 +410,31 @@ _sonarr_extract_series() {
     }
     END {
         if (_best_score > 0) print _best
-    }'
+        }'
+    local _pipeline_status=$?
+    _LOG_CTX="$_previous_log_ctx"
+    return "$_pipeline_status"
 }
 
 # find_sonarr_series <title>
 # Sets globals: SERIES_ID, SERIES_TITLE
 # Returns: 0 = found  1 = not found
 find_sonarr_series() {
+    local _previous_log_ctx="$_LOG_CTX"
     _LOG_CTX="find_sonarr_series"
     local _var_clean
     _var_clean=$(_universal_clean "$1")
 
     log_debug "Sonarr lookup: [$1]"
     local _resp
-    _resp=$(_sonarr_get "/series/lookup?term=$(urlencode "$1")") || return 1
-    [ -z "$_resp" ] || [ "$_resp" = "[]" ] && return 1
+    _resp=$(_sonarr_get "/series/lookup?term=$(urlencode "$1")") || {
+        _LOG_CTX="$_previous_log_ctx"
+        return 1
+    }
+    [ -z "$_resp" ] || [ "$_resp" = "[]" ] && {
+        _LOG_CTX="$_previous_log_ctx"
+        return 1
+    }
 
     log_debug "Sanitised search term: [$_var_clean]/[$SEASON_NUM]"
     local _title="" _tvdbId="" _year="" _tmdbId="" _cleanTitle=""
@@ -445,8 +458,10 @@ EOF
     fi
     log_info "Sonarr match: id=[$SERIES_ID] title=[$SERIES_TITLE] via=[$1]"
     if [ -n "$SERIES_TITLE" ]; then
+        _LOG_CTX="$_previous_log_ctx"
         return 0
     fi
+    _LOG_CTX="$_previous_log_ctx"
     return 1
 }
 
@@ -455,14 +470,22 @@ EOF
 # Sets global: EPISODE_TITLE
 # Returns: 0 = found  1 = not found
 _sonarr_lookup_episode() {
+    local _previous_log_ctx="$_LOG_CTX"
+    _LOG_CTX="_sonarr_lookup_episode"
     local _sn="$1"
     local _en="$2"
     local _ep_f
     _ep_f=$(_tmpfile "ep_list")
 
     local _resp
-    _resp=$(_sonarr_get "/episode?seriesId=${SERIES_ID}&seasonNumber=${_sn}") || return 1
-    [ -z "$_resp" ] || [ "$_resp" = "[]" ] && return 1
+    _resp=$(_sonarr_get "/episode?seriesId=${SERIES_ID}&seasonNumber=${_sn}") || {
+        _LOG_CTX="$_previous_log_ctx"
+        return 1
+    }
+    [ -z "$_resp" ] || [ "$_resp" = "[]" ] && {
+        _LOG_CTX="$_previous_log_ctx"
+        return 1
+    }
     json_split "$_resp" > "$_ep_f"
 
     local _want
@@ -475,10 +498,12 @@ _sonarr_lookup_episode() {
         if [ "$_got" = "$_want" ]; then
             EPISODE_TITLE=$(json_str "title" "$_ep")
             log_info "Episode match: S$(pad2 "$_sn")E$(pad2 "$_en") — [$EPISODE_TITLE]"
+            _LOG_CTX="$_previous_log_ctx"
             return 0
         fi
     done < "$_ep_f"
 
+    _LOG_CTX="$_previous_log_ctx"
     return 1
 }
 
@@ -526,6 +551,7 @@ _radarr_get() {
 # Sets globals: MOVIE_TITLE, MOVIE_YEAR
 # Returns: 0 = found  1 = not found
 find_radarr_movie() {
+    local _previous_log_ctx="$_LOG_CTX"
     _LOG_CTX="find_radarr_movie"
     local _title="$1"
     local _year="${2:-}"
@@ -567,9 +593,11 @@ find_radarr_movie() {
         MOVIE_TITLE=$(json_str "title" "$_obj")
         MOVIE_YEAR=$(json_num "year"  "$_obj")
         log_info "Radarr match: title=[$MOVIE_TITLE] year=[$MOVIE_YEAR] via=[$_var]"
+        _LOG_CTX="$_previous_log_ctx"
         return 0
     done < "$_var_f"
 
+    _LOG_CTX="$_previous_log_ctx"
     return 1
 }
 
@@ -615,6 +643,7 @@ _safe_dirname() {
 # Creates dest_dir if needed.  Refreshes existing symlinks.
 # Returns: 0 = ok  1 = error
 _make_symlink() {
+    local _previous_log_ctx="$_LOG_CTX"
     _LOG_CTX="_make_symlink"
     local _src="$1"
     local _ddir="$2"
@@ -624,23 +653,31 @@ _make_symlink() {
     if [ "$DRY_RUN" = "1" ]; then
         log_info "[DRY_RUN] mkdir -p $_ddir"
         log_info "[DRY_RUN] ln -sf   $_src  →  $_dst"
+        _LOG_CTX="$_previous_log_ctx"
         return 0
     fi
 
-    mkdir -p "$_ddir" || { log_error "Cannot create dir: $_ddir"; return 1; }
+    mkdir -p "$_ddir" || {
+        log_error "Cannot create dir: $_ddir"
+        _LOG_CTX="$_previous_log_ctx"
+        return 1
+    }
 
     if [ -L "$_dst" ]; then
         log_warn "Refreshing existing symlink: $_dst"
         rm -f "$_dst"
     elif [ -e "$_dst" ]; then
         log_error "Path exists and is not a symlink — skipping: $_dst"
+        _LOG_CTX="$_previous_log_ctx"
         return 1
     fi
 
     if ln -sf "$_src" "$_dst"; then
         log_info "Symlink OK: [$_dst]"
+        _LOG_CTX="$_previous_log_ctx"
     else
         log_error "ln -sf failed: $_src → $_dst"
+        _LOG_CTX="$_previous_log_ctx"
         return 1
     fi
 }
@@ -650,6 +687,7 @@ _make_symlink() {
 # while-read loop without leaking through a subshell).
 # Returns: 0 = all ok  1 = one or more failed
 _link_files() {
+    local _previous_log_ctx="$_LOG_CTX"
     _LOG_CTX="_link_files"
     local _list="$1"
     local _dir="$2"
@@ -664,7 +702,12 @@ _link_files() {
     done < "$_list"
 
     _errs=$(cat "$_err_f")
-    [ "$_errs" -gt 0 ] && { log_error "$_errs symlink(s) failed"; return 1; }
+    [ "$_errs" -gt 0 ] && {
+        log_error "$_errs symlink(s) failed"
+        _LOG_CTX="$_previous_log_ctx"
+        return 1
+    }
+    _LOG_CTX="$_previous_log_ctx"
     return 0
 }
 
@@ -677,6 +720,7 @@ _link_files() {
 # ───────────────────────────────────────────────────────────────────
 
 handle_tv() {
+    local _previous_log_ctx="$_LOG_CTX"
     _LOG_CTX="handle_tv"
     log_info "--- TV handler ---"
 
@@ -706,8 +750,21 @@ handle_tv() {
 
     # 4. Find every video file inside the torrent path
     local _vf_list _f
+    log_info "Step 4: discovering video files under [$TORRENT_PATH]"
+    if [ ! -e "$TORRENT_PATH" ]; then
+        log_error "Step 4: torrent path does not exist: [$TORRENT_PATH]"
+        exit 30
+    fi
+    if [ ! -r "$TORRENT_PATH" ]; then
+        log_error "Step 4: torrent path is not readable: [$TORRENT_PATH]"
+        exit 30
+    fi
     _vf_list=$(_tmpfile "tv_videos")
-    find_video_files "$TORRENT_PATH" > "$_vf_list"
+    if ! find_video_files "$TORRENT_PATH" > "$_vf_list"; then
+        log_error "Step 4: file discovery failed for [$TORRENT_PATH]"
+        exit 30
+    fi
+    log_debug "Step 4: video list written to [$_vf_list]"
     [ -s "$_vf_list" ] || die "No video files found in: $TORRENT_PATH" 30
     log_info "Video files:"; while IFS= read -r _f; do log_info "  $_f"; done < "$_vf_list"
 
@@ -717,9 +774,11 @@ handle_tv() {
     _dest="${JELLYFIN_TV_ROOT}/$(_safe_dirname "$SERIES_TITLE")/Season $(pad2 "${SEASON_NUM:-0}")"
     log_info "Target dir : [$_dest]"
     _link_files "$_vf_list" "$_dest" || exit 30
+    _LOG_CTX="$_previous_log_ctx"
 }
 
 handle_movie() {
+    local _previous_log_ctx="$_LOG_CTX"
     _LOG_CTX="handle_movie"
     log_info "--- Movie / one-off handler ---"
 
@@ -739,8 +798,21 @@ handle_movie() {
 
     # 3. Find every video file inside the torrent path
     local _vf_list _f
+    log_info "Step 3: discovering video files under [$TORRENT_PATH]"
+    if [ ! -e "$TORRENT_PATH" ]; then
+        log_error "Step 3: torrent path does not exist: [$TORRENT_PATH]"
+        exit 30
+    fi
+    if [ ! -r "$TORRENT_PATH" ]; then
+        log_error "Step 3: torrent path is not readable: [$TORRENT_PATH]"
+        exit 30
+    fi
     _vf_list=$(_tmpfile "mv_videos")
-    find_video_files "$TORRENT_PATH" > "$_vf_list"
+    if ! find_video_files "$TORRENT_PATH" > "$_vf_list"; then
+        log_error "Step 3: file discovery failed for [$TORRENT_PATH]"
+        exit 30
+    fi
+    log_debug "Step 3: video list written to [$_vf_list]"
     [ -s "$_vf_list" ] || die "No video files found in: $TORRENT_PATH" 30
     log_info "Video files:"; while IFS= read -r _f; do log_info "  $_f"; done < "$_vf_list"
 
@@ -752,6 +824,7 @@ handle_movie() {
     _dest="${JELLYFIN_MOVIES_ROOT}/$(_safe_dirname "$_movie_dir")"
     log_info "Target dir : [$_dest]"
     _link_files "$_vf_list" "$_dest" || exit 30
+    _LOG_CTX="$_previous_log_ctx"
 }
 
 
