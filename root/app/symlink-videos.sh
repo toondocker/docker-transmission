@@ -397,8 +397,8 @@ _sonarr_extract_series() {
         match($0, /[0-9]+/)
         _seasonCount = substr($0, RSTART, RLENGTH) + 0
         if ((_cleanTitle_cmp == search || _cleanTitle == search) && _seasonCount >= min_seasons) {
-            # Prefer a continuing series when several candidates match.
-            _score = (_status == "continuing") ? 2 : 1
+            # Prefer continuing or upcoming series when several candidates match.
+            _score = (_status == "continuing" || _status == "upcoming") ? 2 : 1
             if (_score > _best_score) {
                 _best_score = _score
                 _best = _title "|" _tvdbId "|" _year "|" _tmdbId "|" _cleanTitle
