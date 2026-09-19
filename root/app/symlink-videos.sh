@@ -621,11 +621,16 @@ find_video_files() {
     local _p="$1"
     local _f
     if [ -f "$_p" ]; then
-        _is_video_file "$_p" && printf '%s\n' "$_p"
+        if _is_video_file "$_p"; then
+            printf '%s\n' "$_p"
+        fi
     elif [ -d "$_p" ]; then
         find "$_p" -type f | while IFS= read -r _f; do
             [ -z "$_f" ] && continue
-            _is_video_file "$_f" && printf '%s\n' "$_f"
+            if _is_video_file "$_f"; then
+                printf '%s\n' "$_f"
+            fi
+            :
         done
     fi
 }
