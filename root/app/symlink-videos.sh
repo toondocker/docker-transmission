@@ -625,9 +625,9 @@ find_video_files() {
             printf '%s\n' "$_p"
         fi
     elif [ -d "$_p" ]; then
-        find "$_p" -type f | while IFS= read -r _f; do
+        find "$_p" \( -type f -o -type l \) | while IFS= read -r _f; do
             [ -z "$_f" ] && continue
-            if _is_video_file "$_f"; then
+            if [ -f "$_f" ] && _is_video_file "$_f"; then
                 printf '%s\n' "$_f"
             fi
             :
