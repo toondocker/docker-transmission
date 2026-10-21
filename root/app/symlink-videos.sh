@@ -2,9 +2,10 @@
 # shellcheck shell=ash
 
 # ═══════════════════════════════════════════════════════════════════
-# symlink-videos.sh — Unified torrent post-process
+# symlink-videos-v2.sh — Unified torrent post-process (v2)
 #
-# Handles TV releases (via Sonarr) and Movies / one-offs (via Radarr).
+# Handles TV releases (via standalone series-lookup.sh or Sonarr)
+# and Movies / one-offs (via Radarr).
 # Creates Jellyfin-compatible symlinks in the correct directory layout.
 #
 # Compatible: BusyBox sh / POSIX sh — no bash, no jq, no python, no perl
@@ -16,9 +17,10 @@
 #   TR_TORRENT_DIR    directory where the torrent was saved
 #
 # Environment:
-#   SONARR_API_KEY        required for TV releases
-#   RADARR_API_KEY        required for movie releases
+#   SERIES_LOOKUP_BIN     path to series-lookup.sh (default: ./series-lookup.sh)
+#   SONARR_API_KEY        optional (only needed if Sonarr is explicitly preferred)
 #   SONARR_URL            default: http://sonarr:8989
+#   RADARR_API_KEY        optional (for movie lookups via Radarr)
 #   RADARR_URL            default: http://radarr:7878
 #   VIDEO_LINKS           default: /video-links
 #   MOVIE_LINKS           default: /movie-links
@@ -31,7 +33,7 @@
 #   0   success
 #   1   bad arguments / fatal config
 #   10  release type unrecognised
-#   20  Sonarr / Radarr returned no match
+#   20  Metadata provider returned no match
 #   30  symlink creation failure
 # ═══════════════════════════════════════════════════════════════════
 
@@ -43,6 +45,10 @@ set -eu
 # ───────────────────────────────────────────────────────────────────
 # §1  CONFIGURATION
 # ───────────────────────────────────────────────────────────────────
+
+_SCRIPT_DIR="$(dirname "$0")"
+# TV Metadata lookup tool (defaults to series-lookup.sh next to this script)
+SERIES_LOOKUP_BIN="${SERIES_LOOKUP_BIN:-${_SCRIPT_DIR}/series-lookup.sh}"
 
 SONARR_URL="${SONARR_URL:-http://sonarr:8989}"
 RADARR_URL="${RADARR_URL:-http://radarr:7878}"
@@ -155,7 +161,6 @@ json_split() {
         | sed 's/^[[:space:]]*\[[[:space:]]*//; s/[[:space:]]*\][[:space:]]*$//' \
         | awk '{ gsub(/},[[:space:]]*{/, "}\n{"); print }'
 }
-
 
 
 # ───────────────────────────────────────────────────────────────────
@@ -344,7 +349,14 @@ extract_year() {
 }
 
 # ───────────────────────────────────────────────────────────────────
-# §7  SONARR INTEGRATION
+# §7  TV SERIES INTEGRATION (Standalone series-lookup / Sonarr fallback)
+#
+# Hybrid Architecture:
+#   1. Primary: Invokes standalone `series-lookup.sh`, which queries public
+#      metadata providers (Sonarr SkyHook backend, with TVMaze fallback)
+#      requiring NO running Sonarr instance and NO API keys.
+#   2. Fallback: If `series-lookup.sh` is unavailable or returns no match,
+#      and `SONARR_API_KEY` is provided, queries Sonarr's /series/lookup API.
 # ───────────────────────────────────────────────────────────────────
 
 _sonarr_get() {
@@ -416,33 +428,53 @@ _sonarr_extract_series() {
     return "$_pipeline_status"
 }
 
-# find_sonarr_series <title>
+# find_tv_series <title>
+# Primary resolution via series-lookup.sh with fallback to Sonarr API.
 # Sets globals: SERIES_ID, SERIES_TITLE
 # Returns: 0 = found  1 = not found
-find_sonarr_series() {
+find_tv_series() {
     local _previous_log_ctx="$_LOG_CTX"
-    _LOG_CTX="find_sonarr_series"
+    _LOG_CTX="find_tv_series"
+    local _title_in="$1"
     local _var_clean
-    _var_clean=$(_universal_clean "$1")
+    _var_clean=$(_universal_clean "$_title_in")
 
-    log_debug "Sonarr lookup: [$1]"
-    local _resp
-    _resp=$(_sonarr_get "/series/lookup?term=$(urlencode "$1")") || {
-        _LOG_CTX="$_previous_log_ctx"
-        return 1
-    }
-    [ -z "$_resp" ] || [ "$_resp" = "[]" ] && {
-        _LOG_CTX="$_previous_log_ctx"
-        return 1
-    }
-
-    log_debug "Sanitised search term: [$_var_clean]/[$SEASON_NUM]"
+    log_debug "TV series lookup: [$_title_in]"
     local _title="" _tvdbId="" _year="" _tmdbId="" _cleanTitle=""
-    # the following 3 lines are deliberately in column 1
+
+    # 1. Primary: Use standalone series-lookup.sh if available
+    if [ -x "$SERIES_LOOKUP_BIN" ] || [ -f "$SERIES_LOOKUP_BIN" ]; then
+        log_debug "Using standalone lookup tool: [$SERIES_LOOKUP_BIN]"
+        local _lookup_out
+        _lookup_out=$(sh "$SERIES_LOOKUP_BIN" "$_title_in" "${SEASON_NUM:-1}" 2>/dev/null || true)
+        if [ -n "$_lookup_out" ]; then
+            # the following 3 lines are deliberately in column 1
+IFS='|' read -r _title _tvdbId _year _tmdbId _cleanTitle <<EOF
+$_lookup_out
+EOF
+        fi
+    fi
+
+    # 2. Fallback to Sonarr API if credentials are provided and standalone returned nothing
+    if [ -z "$_title" ] && [ -n "$SONARR_API_KEY" ] && [ -n "$SONARR_URL" ]; then
+        log_debug "Querying Sonarr API at $SONARR_URL"
+        local _resp
+        _resp=$(_sonarr_get "/series/lookup?term=$(urlencode "$_title_in")") || true
+        if [ -n "$_resp" ] && [ "$_resp" != "[]" ]; then
+            # the following 3 lines are deliberately in column 1
 IFS='|' read -r _title _tvdbId _year _tmdbId _cleanTitle <<EOF
 $(_sonarr_extract_series "$_resp" "$_var_clean" "$SEASON_NUM")
 EOF
-    log_debug "Sonarr response: title=[$_title] tvdbId=[$_tvdbId] year=[$_year] tmdbId=[$_tmdbId] cleanTitle=[$_cleanTitle] - via=[$_var_clean]"
+        fi
+    fi
+
+    if [ -z "$_title" ]; then
+        log_warn "No TV series match found for: [$_title_in]"
+        _LOG_CTX="$_previous_log_ctx"
+        return 1
+    fi
+
+    log_debug "Series response: title=[$_title] tvdbId=[$_tvdbId] year=[$_year] tmdbId=[$_tmdbId] cleanTitle=[$_cleanTitle] - via=[$_var_clean]"
     SERIES_TITLE="$_title"
     if [ -n "$_year" ]; then
         case "$SERIES_TITLE" in
@@ -456,55 +488,65 @@ EOF
     if [ -n "$_tmdbId" ] && [ "$_tmdbId" != "0" ]; then
         SERIES_TITLE="$SERIES_TITLE [tmdbid-$_tmdbId]"
     fi
-    log_info "Sonarr match: id=[$SERIES_ID] title=[$SERIES_TITLE] via=[$1]"
-    if [ -n "$SERIES_TITLE" ]; then
-        _LOG_CTX="$_previous_log_ctx"
-        return 0
-    fi
+    log_info "TV match: title=[$SERIES_TITLE] via=[$_title_in]"
     _LOG_CTX="$_previous_log_ctx"
-    return 1
+    return 0
 }
 
-# _sonarr_lookup_episode <season_num> <episode_num>
-# Requires SERIES_ID to already be set.
+# Alias for backward compatibility with external callers
+find_sonarr_series() {
+    find_tv_series "$@"
+}
+
+# find_episode_title <season_num> <episode_num>
+# Looks up episode title via standalone series-lookup.sh, with fallback to Sonarr.
 # Sets global: EPISODE_TITLE
 # Returns: 0 = found  1 = not found
-_sonarr_lookup_episode() {
+find_episode_title() {
     local _previous_log_ctx="$_LOG_CTX"
-    _LOG_CTX="_sonarr_lookup_episode"
+    _LOG_CTX="find_episode_title"
     local _sn="$1"
     local _en="$2"
-    local _ep_f
-    _ep_f=$(_tmpfile "ep_list")
-
-    local _resp
-    _resp=$(_sonarr_get "/episode?seriesId=${SERIES_ID}&seasonNumber=${_sn}") || {
-        _LOG_CTX="$_previous_log_ctx"
-        return 1
-    }
-    [ -z "$_resp" ] || [ "$_resp" = "[]" ] && {
-        _LOG_CTX="$_previous_log_ctx"
-        return 1
-    }
-    json_split "$_resp" > "$_ep_f"
-
-    local _want
-    _want=$(strip_zeros "$_en")
     EPISODE_TITLE=""
-    local _ep _got
-    while IFS= read -r _ep; do
-        [ -z "$_ep" ] && continue
-        _got=$(strip_zeros "$(json_num "episodeNumber" "$_ep")")
-        if [ "$_got" = "$_want" ]; then
-            EPISODE_TITLE=$(json_str "title" "$_ep")
+
+    # 1. Try standalone episode lookup (via TVMaze / public backend)
+    if [ -x "$SERIES_LOOKUP_BIN" ] || [ -f "$SERIES_LOOKUP_BIN" ]; then
+        EPISODE_TITLE=$(sh "$SERIES_LOOKUP_BIN" episode "$CANONICAL_TITLE" "$_sn" "$_en" 2>/dev/null || true)
+        if [ -n "$EPISODE_TITLE" ]; then
             log_info "Episode match: S$(pad2 "$_sn")E$(pad2 "$_en") — [$EPISODE_TITLE]"
             _LOG_CTX="$_previous_log_ctx"
             return 0
         fi
-    done < "$_ep_f"
+    fi
+
+    # 2. Try Sonarr episode lookup if SERIES_ID and SONARR_API_KEY exist
+    if [ -n "$SERIES_ID" ] && [ -n "$SONARR_API_KEY" ]; then
+        local _ep_f _resp _want _ep _got
+        _ep_f=$(_tmpfile "ep_list")
+        _resp=$(_sonarr_get "/episode?seriesId=${SERIES_ID}&seasonNumber=${_sn}") || true
+        if [ -n "$_resp" ] && [ "$_resp" != "[]" ]; then
+            json_split "$_resp" > "$_ep_f"
+            _want=$(strip_zeros "$_en")
+            while IFS= read -r _ep; do
+                [ -z "$_ep" ] && continue
+                _got=$(strip_zeros "$(json_num "episodeNumber" "$_ep")")
+                if [ "$_got" = "$_want" ]; then
+                    EPISODE_TITLE=$(json_str "title" "$_ep")
+                    log_info "Episode match (Sonarr): S$(pad2 "$_sn")E$(pad2 "$_en") — [$EPISODE_TITLE]"
+                    _LOG_CTX="$_previous_log_ctx"
+                    return 0
+                fi
+            done < "$_ep_f"
+        fi
+    fi
 
     _LOG_CTX="$_previous_log_ctx"
     return 1
+}
+
+# Alias for backward compatibility
+_sonarr_lookup_episode() {
+    find_episode_title "$@"
 }
 
 
@@ -635,6 +677,7 @@ find_video_files() {
     fi
 }
 
+
 # ───────────────────────────────────────────────────────────────────
 # §10  SYMLINK HELPERS
 # ───────────────────────────────────────────────────────────────────
@@ -721,7 +764,7 @@ _link_files() {
 # §11  HIGH-LEVEL HANDLERS
 #
 # Each handler owns its full workflow end-to-end:
-#   extract metadata → resolve in *arr → find files → create symlinks
+#   extract metadata → resolve in metadata provider → find files → create symlinks
 # ───────────────────────────────────────────────────────────────────
 
 handle_tv() {
@@ -736,17 +779,14 @@ handle_tv() {
     log_info "Season : [${SEASON_NUM:-<none>}]"
     log_info "Episode: [${EPISODE_NUM:-<none>}]"
 
-    # 2. Resolve the series in Sonarr (fatal if not found)
-    [ -z "$SONARR_API_KEY" ] && die "SONARR_API_KEY is required for TV releases" 1
-    find_sonarr_series "$CANONICAL_TITLE" \
-        || die "No Sonarr series found for: [$CANONICAL_TITLE]" 20
+    # 2. Resolve the series metadata (fatal if not found)
+    find_tv_series "$CANONICAL_TITLE" \
+        || die "No TV series metadata found for: [$CANONICAL_TITLE]" 20
 
-    # 3. Resolve the episode title in Sonarr (informational; non-fatal)
-    if [ -n "$SERIES_ID" ] && [ -n "$SEASON_NUM" ] && [ -n "$EPISODE_NUM" ]; then
-        _sonarr_lookup_episode "$SEASON_NUM" "$EPISODE_NUM" \
-            || log_warn "S$(pad2 "$SEASON_NUM")E$(pad2 "$EPISODE_NUM") not found in Sonarr (may not have aired yet)"
-    elif [ -z "$SERIES_ID" ] && [ -n "$SEASON_NUM" ] && [ -n "$EPISODE_NUM" ]; then
-        log_info "Series not in local Sonarr library — skipping episode title lookup"
+    # 3. Resolve the episode title (informational; non-fatal)
+    if [ -n "$SEASON_NUM" ] && [ -n "$EPISODE_NUM" ]; then
+        find_episode_title "$SEASON_NUM" "$EPISODE_NUM" \
+            || log_info "S$(pad2 "$SEASON_NUM")E$(pad2 "$EPISODE_NUM") episode title not found or skipped"
     elif [ -n "$SEASON_NUM" ]; then
         log_info "Season pack — no individual episode number"
     else
@@ -845,7 +885,7 @@ main() {
     TORRENT_PATH="${TR_TORRENT_DIR}/${TR_TORRENT_NAME}"
 
     log_info "========================================================"
-    log_info "=== postprocess start"
+    log_info "=== postprocess start (v2)"
     log_info "Torrent name : [$TORRENT_NAME]"
     log_info "Torrent path : [$TORRENT_PATH]"
 
