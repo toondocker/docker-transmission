@@ -34,13 +34,23 @@ HTTP_TIMEOUT="${SERIES_HTTP_TIMEOUT:-10}"
 
 _http_get() {
     local _url="$1"
-    if command -v curl >/dev/null 2>&1; then
-        curl -fsSL --max-time "$HTTP_TIMEOUT" "$_url" 2>/dev/null
-    elif command -v wget >/dev/null 2>&1; then
-        wget -qO- --timeout="$HTTP_TIMEOUT" "$_url" 2>/dev/null
-    else
-        return 1
+    local _response
+
+    if command -v wget >/dev/null 2>&1; then
+        if _response=$(wget -qO- --timeout="$HTTP_TIMEOUT" "$_url" 2>/dev/null); then
+            printf '%s' "$_response"
+            return 0
+        fi
     fi
+
+    if command -v curl >/dev/null 2>&1; then
+        if _response=$(curl -fsSL --max-time "$HTTP_TIMEOUT" "$_url" 2>/dev/null); then
+            printf '%s' "$_response"
+            return 0
+        fi
+    fi
+
+    return 1
 }
 
 urlencode() {
