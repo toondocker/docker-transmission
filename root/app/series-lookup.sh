@@ -126,6 +126,8 @@ parse_skyhook() {
       awk -F'"' -v search="$_search" -v min_seasons="$_min_seasons" -v fmt="$_fmt" '
       function uclean(str) {
           s = tolower(str)
+          gsub(/\\u0026/, " and ", s)
+          gsub(/&/, " and ", s)
           gsub(/[.:\-_]/, " ", s)
           gsub(/[[:space:]]+the[[:space:]]+/, " ", s)
           gsub(/[[:space:]]+and[[:space:]]+/, " ", s)
@@ -228,6 +230,8 @@ parse_tvmaze() {
       awk -F'"' -v search="$_search" -v fmt="$_fmt" '
       function uclean(str) {
           s = tolower(str)
+          gsub(/\\u0026/, " and ", s)
+          gsub(/&/, " and ", s)
           gsub(/[.:\-_]/, " ", s)
           gsub(/[[:space:]]+the[[:space:]]+/, " ", s)
           gsub(/[[:space:]]+and[[:space:]]+/, " ", s)
